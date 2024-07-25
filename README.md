@@ -1,15 +1,9 @@
-# Mathsys_RG_2024
+# Constrained Optimization: Which Constraints Matter?
 
-In principle you only need to install Botorch ( For more info refer to https://botorch.org/) through
+At least BoTorch 0.9 or higher is required. Using Python 3.10 or higher run:
 
-pip install botorch
+`pip install --upgrade pip`,
 
-in *python 3.8.0*
+then 
 
-Otherwise, you could also match all my dependencies by installing my environment conda:
-
-conda env create --file=environment.yaml
-
-Conda is a great way to organize your environments. I highly recommend to use it.
-
-After installing your enviroment, make sure the repo recognizes all dependencies.
+`pip install botorch`.

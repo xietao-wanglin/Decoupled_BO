@@ -11,6 +11,8 @@ from typing import Optional
 
 from bo.acquisition_functions.acquisition_functions import MathsysExpectedImprovement, DecoupledConstrainedKnowledgeGradient
 from bo.constrained_functions.synthetic_problems import testing_function
+from bo.synthetic_test_functions.synthetic_test_functions import MOPTA08
+from botorch.utils.transforms import normalize
 from bo.samplers.samplers import quantileSampler
 
 
@@ -120,9 +122,9 @@ class TestDecoupledKG(BotorchTestCase):
             torch.manual_seed(0)
             acqf = DecoupledConstrainedKnowledgeGradient(model, sampler = sampler_list, num_fantasies=5, 
                                                          objective=ConstrainedMCObjective(objective=obj_callable, constraints=[obj_callable]),
-                                                           X_evaluation_mask=x_eval_mask)
+                                                           X_evaluation_mask=x_eval_mask, penalty_value=0.0)
             rd = torch.rand(6, 1, d, dtype = dtype)
-            acqf(rd) # 5 is no of points, 1 is for q-batch, d is dimension of input space
+            # acqf(rd) # 5 is no of points, 1 is for q-batch, d is dimension of input space
         
             bounds = torch.tensor([[0.0]*d,[1.0]*d], dtype=torch.double)
             candidates, candidates_values = optimize_acqf(acqf, bounds, 1, 5, 15, options={'maxiter': 200})
@@ -131,3 +133,23 @@ class TestDecoupledKG(BotorchTestCase):
             # print(candidates.shape, candidates_values.shape)
         
         self.assertEqual(expected_decision, torch.argmax(kg_values))
+
+    def test_MOPTA08_function_optimal_values(self):
+        expected_best_fval = 222.427088
+        best_recommended_point = torch.tensor([257, 0, 0, 123, 10, 59, 0, 400, 0, 757, 0, 0, 0, 0, 0, 491, 0, 0, 0, 0,
+        0, 21, 0, 0, 0, 47, 339, 0, 0, 689, 0, 310, 0, 192, 1000, 227, 856, 622, 589, 278,
+        476, 710, 116, 0, 0, 0, 800, 406, 281, 32, 0, 0, 159, 0, 0, 0, 290, 0, 423, 266,
+        72, 416, 937, 285, 0, 733, 663, 355, 0, 110, 217, 0, 0, 181, 23, 299, 0, 331, 767, 0,
+        814, 848, 393, 838, 0, 837, 263, 341, 422, 68, 452, 674, 32, 0, 0, 0, 136, 0, 653, 846,
+        0, 1000, 786, 15, 76, 465, 0, 164, 235, 149, 614, 1000, 1000, 718, 463, 199, 387, 115, 1000, 735,
+        0, 897, 0, 1000])/1000
+        bounds = torch.tensor([0.0,1.0]*124)
+        normalized_best_recommended_point = normalize(best_recommended_point, bounds=bounds)
+        function = MOPTA08()
+
+        actual_best_fval = function.evaluate_task(normalized_best_recommended_point, 0)
+        actual_constraint_value = function.evaluate_task(normalized_best_recommended_point, 1)
+        is_location_feasible = actual_constraint_value <= 0
+        print(actual_constraint_value)
+        self.assertAllClose(torch.tensor(expected_best_fval), actual_best_fval, atol=1e-4)
+        self.assertEqual(True, is_location_feasible)

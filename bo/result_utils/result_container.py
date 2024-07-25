@@ -11,11 +11,20 @@ class Results():
         self.performance_type = None
         self.number_initial_samples = None
         self.budget = None
+        self.acqf_values = []
         self.best_predicted_location = []
         self.best_predicted_location_true_value = []
         self.acqf_recommended_location = []
         self.acqf_recommended_location_value = []
         self.acqf_recommended_output_index = []
+        self.failing_constraint = []
+        self.evals = []
+
+    def save_failing_constraint(self, k):
+        if k == -1:
+            self.failing_constraint.append("None")
+        else:
+            self.failing_constraint.append(k)
 
     def save_input_data(self, x):
         self.input_data = x
@@ -50,6 +59,9 @@ class Results():
     def save_budget(self, budget):
         self.budget = budget
 
+    def save_evaluated_functions(self, evals):
+        self.evals.append(evals)
+
     def generate_pkl_file(self):
         # Create a directory called 'results' if it doesn't exist
         results_dir = 'results'
@@ -64,7 +76,7 @@ class Results():
         # Serialize the results and save them to a pickle file
         with open(self.filepath, 'wb') as f:
             pickle.dump(results_dict, f)
-        print(f"Results saved to: {self.filepath}")
+        print(f"Results saved to: {self.filepath} \n")
 
     def _build_results_dict(self):
         return {"path": self.filepath,
@@ -79,4 +91,9 @@ class Results():
                 "best_predicted_location_value": self.best_predicted_location_true_value,
                 "acqf_recommended_location": self.acqf_recommended_location,
                 "acqf_recommended_location_value": self.acqf_recommended_location_value,
-                "acqf_recommended_output_index:": self.acqf_recommended_output_index}
+                "acqf_recommended_output_index:": self.acqf_recommended_output_index,
+                "failing_index:": self.failing_constraint,
+                "evaluated_functions": self.evals}
+
+    def save_acqf_values(self, acqf_values):
+        self.acqf_values.append(acqf_values)

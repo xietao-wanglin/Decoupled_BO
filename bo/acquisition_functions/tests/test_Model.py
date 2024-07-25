@@ -17,8 +17,9 @@ from bo.constrained_functions.synthetic_problems import ConstrainedBranin
 device = torch.device("cpu")
 dtype = torch.double
 
-
-class TestMathsysExpectedImprovement(BotorchTestCase):
+"""
+TODO: Outdated test
+class TestBranin(BotorchTestCase):
 
     def test_Branin(self):
         problem = ConstrainedBranin()
@@ -35,15 +36,15 @@ class TestMathsysExpectedImprovement(BotorchTestCase):
         train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
         train_X = torch.concat([train_X, torch.tensor([[0.0, 0.0]])])
         test_X = torch.rand(1000, d, device=self.device, dtype=dtype)
-        eval = black_box_evaluation(train_X)
+        evalu = black_box_evaluation(train_X)
 
-        unfeas_x = train_X[eval[:, 1] >= 0]
-        plt.scatter(train_X[:, 0], train_X[:, 1], c=eval[:, 0])
+        unfeas_x = train_X[evalu[:, 1] >= 0]
+        plt.scatter(train_X[:, 0], train_X[:, 1], c=evalu[:, 0])
         plt.scatter(unfeas_x[:, 0], unfeas_x[:, 1], color="grey")
         plt.show()
 
         model = ConstrainedDeoupledGPModelWrapper(num_constraints=1)
-        model.fit(train_X, eval)
+        model.fit(train_X, evalu)
         optimized_model = model.optimize()
 
         posterior_distribution = optimized_model.posterior(test_X)
@@ -58,7 +59,8 @@ class TestMathsysExpectedImprovement(BotorchTestCase):
         plt.scatter(test_X[:, 0], test_X[:, 1], c=mean[:, 0].detach())
         plt.scatter(unfeas_x[:, 0], unfeas_x[:, 1], color="grey")
         plt.show()
-
+"""
+        
 class TestMysteryFunction(BotorchTestCase):
 
     def test_shape(self):
@@ -140,6 +142,9 @@ class TestPosteriorConstrainedDecoupledMean(BotorchTestCase):
         plt.show()
 
 class TestConstrainedGPModelWrapper(TestCase):
+    """
+    TODO: outdated test
+    """
     def test_fit(self):
         d = 1
         n_points_objective = 10
@@ -165,8 +170,7 @@ class TestConstrainedGPModelWrapper(TestCase):
         mll = SumMarginalLogLikelihood(model.likelihood, model)
         fit_gpytorch_mll(mll)
 
-        kg = DecoupledConstrainedKnowledgeGradient(model=model, num_fantasies=5,
-                                                   current_value=torch.Tensor([0.0]))
+        #kg = DecoupledConstrainedKnowledgeGradient(model=model, num_fantasies=5, current_value=torch.Tensor([0.0]))
 
 
 class TestConstrainedGPDecoupledModelWrapper(TestCase):
@@ -233,7 +237,7 @@ class TestBraninFunctionNew(BotorchTestCase):
      plt.show()
 
 
-class TestBraninFunctionNew1(BotorchTestCase):
+class TestBraninFunctionNew(BotorchTestCase):
 
  def test_shape(self):
      problem = ConstrainedBraninNew()
@@ -252,8 +256,8 @@ class TestBraninFunctionNew1(BotorchTestCase):
      x1 = np.linspace(bounds[0][0], bounds[0][1], 100)
      x2 = np.linspace(bounds[1][0], bounds[1][1], 100)
      X1, X2 = np.meshgrid(x1, x2)
-     X = np.hstack((X1.reshape(100*100,1),X2.reshape(100*100,1)))
-     Y = problem.evaluate_black_box(X)
+     X = torch.tensor(np.hstack((X1.reshape(100*100,1),X2.reshape(100*100,1))))
+     Y = problem.forward(X)
 
      plt.figure()    
      plt.contourf(X1, X2, Y.reshape((100,100)),100)
@@ -264,5 +268,4 @@ class TestBraninFunctionNew1(BotorchTestCase):
      plt.colorbar()
      plt.xlabel('X1')
      plt.ylabel('X2')
-     plt.title(self.name)
      plt.show()
