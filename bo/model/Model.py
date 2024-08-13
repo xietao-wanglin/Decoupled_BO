@@ -154,3 +154,9 @@ class ConstrainedDeoupledGPModelWrapper():
         mll = SumMarginalLogLikelihood(self.model.likelihood, self.model)
         fit_gpytorch_mll(mll)
         return self.model
+
+    def get_model_length_scales(self):
+        length_scales = []
+        for i in range(self.num_constraints + 1):
+            length_scales.append(self.model.models[i].covar_module.base_kernel.lengthscale.detach())
+        return length_scales
