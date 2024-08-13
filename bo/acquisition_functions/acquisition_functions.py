@@ -9,6 +9,7 @@ from botorch.acquisition import ExpectedImprovement, \
 from botorch.acquisition.analytic import _ei_helper, PosteriorMean
 from botorch.acquisition.knowledge_gradient import _split_fantasy_points
 from botorch.acquisition.objective import PosteriorTransform
+from botorch.models import ModelListGP
 from botorch.models.model import Model
 from botorch.optim import optimize_acqf, initialize_q_batch
 from botorch.sampling import MCSampler, SobolQMCNormalSampler, ListSampler
@@ -21,6 +22,8 @@ from bo.samplers.samplers import quantileSampler
 
 
 class AcquisitionFunctionType(Enum):
+    COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
+    DECOUPLED_HYBRID_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
     MC_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
     ONESHOT_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
     DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
@@ -59,34 +62,281 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
     elif type is AcquisitionFunctionType.ONESHOT_CONSTRAINED_KNOWLEDGE_GRADIENT:
         return OneShotConstrainedKnowledgeGradient(model, num_fantasies=64, current_value=best_value,
                                                    objective=objective)
-    elif type is AcquisitionFunctionType.MC_CONSTRAINED_KNOWLEDGE_GRADIENT:
+    elif type is AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT:
         sampler = SobolQMCNormalSampler(sample_shape=torch.Size([5]))
         sampler_list = ListSampler(*[sampler] * number_of_outputs)
         x_eval_mask = torch.ones(1, number_of_outputs, dtype=torch.bool)
-        return DecoupledConstrainedKnowledgeGradient(model, sampler=sampler_list, num_fantasies=5,
-                                                     objective=objective,
-                                                     number_of_raw_points=72,  # can make smaller if speed
-                                                     number_of_restarts=15,  # this too, not too small though
-                                                     seed=iteration,
-                                                     # play with this if it gets too slow...get it down a little...
-                                                     X_evaluation_mask=x_eval_mask,
-                                                     penalty_value=penalty_value,
-                                                     x_best_location=initial_condition_internal_optimizer)
-    elif type is AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT:
+        return DecopledHybridConstrainedKnowledgeGradient(model, sampler=sampler_list, num_fantasies=5,
+                                                          objective=objective, number_of_raw_points=72,
+                                                          number_of_restarts=15, X_evaluation_mask=x_eval_mask,
+                                                          seed=iteration, penalty_value=penalty_value,
+                                                          x_best_location=initial_condition_internal_optimizer,
+                                                          evaluate_all_sources=True)
+
+    elif type is AcquisitionFunctionType.DECOUPLED_HYBRID_CONSTRAINED_KNOWLEDGE_GRADIENT:
         sampler = quantileSampler(sample_shape=torch.Size([5]))
         sampler_list = ListSampler(*[sampler] * number_of_outputs)
         x_eval_mask = torch.zeros(1, number_of_outputs,
                                   dtype=torch.bool)  # 2 outputs, 1 == True # Change torch.zeros to ones for coupled cKG
         x_eval_mask[0, idx] = 1
-        return DecoupledConstrainedKnowledgeGradient(model, sampler=sampler_list, num_fantasies=5,
-                                                     objective=objective,
-                                                     number_of_raw_points=72,  # can make smaller if speed
-                                                     number_of_restarts=15,  # this too, not too small though
-                                                     seed=iteration,
-                                                     # play with this if it gets too slow...get it down a little...
-                                                     X_evaluation_mask=x_eval_mask,
-                                                     penalty_value=penalty_value,
-                                                     x_best_location=initial_condition_internal_optimizer)
+        return DecopledHybridConstrainedKnowledgeGradient(model, sampler=sampler_list, num_fantasies=5,
+                                                          objective=objective, number_of_raw_points=72,
+                                                          evaluate_all_sources=False,
+                                                          source_index=idx,
+                                                          number_of_restarts=15, X_evaluation_mask=x_eval_mask,
+                                                          seed=iteration, penalty_value=penalty_value,
+                                                          x_best_location=initial_condition_internal_optimizer)
+
+
+class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, MCAcquisitionFunction):
+
+    def __init__(self, model: Model, sampler: Optional[MCSampler] = None, num_fantasies: Optional[int] = 5,
+                 current_value: Optional[Tensor] = None, objective: Optional[MCAcquisitionObjective] = None,
+                 posterior_transform: Optional[PosteriorTransform] = None, X_pending: Optional[Tensor] = None,
+                 number_of_raw_points: Optional[int] = 64, number_of_restarts: Optional[int] = 20,
+                 X_evaluation_mask: Optional[Tensor] = None, seed: Optional[int] = 0,
+                 penalty_value: Optional[Tensor] = None, x_best_location: Optional[Tensor] = None,
+                 evaluate_all_sources=None, source_index: Optional[int] = None) -> None:
+
+        super().__init__(model=model, sampler=sampler, objective=objective,
+                         posterior_transform=posterior_transform, X_pending=X_pending,
+                         X_evaluation_mask=X_evaluation_mask)
+        self.current_value = current_value
+        self.num_fantasies = num_fantasies
+        self.penalty_value = penalty_value
+        self.number_of_restarts = number_of_restarts
+        self.number_of_raw_points = number_of_raw_points
+        self.seed = seed
+        self.x_best_location = x_best_location
+        self.evaluate_all_sources = evaluate_all_sources
+        self.source_index = source_index
+        if self.source_index is not None:
+            if source_index + 1 > self.X_evaluation_mask.shape[1]:
+                print("number of outputs does not coincide with source index")
+                raise
+
+    def forward(self, X: Tensor) -> Tensor:
+        X_discretisation, fantasised_model = self.compute_optimized_X_discretisation(X)
+        number_of_samples = X.shape[0]
+        kg_values = torch.zeros(number_of_samples)
+        for sample_idx in range(number_of_samples):
+            current_sample_discretisation = X_discretisation[:, :, sample_idx, :, :]
+            xnew = X[sample_idx, ...]
+            kg_values[sample_idx] = self.compute_kg_value(xnew, current_sample_discretisation, fantasised_model,
+                                                          sample_idx)
+        return kg_values
+
+    def compute_kg_value(self, X, X_discretisation, fantasised_model, sample_idx):
+        optimal_discretisation_adapted = X_discretisation.reshape(-1, 1)
+        concatenated_xnew_discretisation = torch.cat([X, self.x_best_location, optimal_discretisation_adapted], dim=0)
+        if self.evaluate_all_sources is True:
+            for f in range(self.num_fantasies):
+                mean_sample_idx_, std_sample_idx_ = self.compute_mean_std_fantasised_model(
+                    concatenated_xnew_discretisation,
+                    fantasised_model, sample_idx)
+                fantasised_probability_of_feasibility = self.compute_probability_of_feasibility(mean_sample_idx_,
+                                                                                                std_sample_idx_)
+                kg_value = self.compute_discrete_kg_values(model=self.model,
+                                                           probability_of_feasibility=fantasised_probability_of_feasibility[
+                                                                                      :, f, :],
+                                                           optimal_discretisation=concatenated_xnew_discretisation,
+                                                           x_new=X)
+        elif (self.evaluate_all_sources is False) and (self.source_index == 0):
+            constraint_models = self.get_constraints_model(self.model)
+            constraints_posterior = constraint_models.posterior(concatenated_xnew_discretisation,
+                                                                observation_noise=False)
+            mean_constraints = constraints_posterior.mean
+            sigma_constraints = constraints_posterior.variance.sqrt().clamp_min(1e-9)
+            probability_feasibility = self.compute_probability_of_feasibility(mean_constraints,
+                                                                              sigma_constraints).reshape(-1, 1)
+            kg_value = self.compute_discrete_kg_values(model=self.model,
+                                                       probability_of_feasibility=probability_feasibility,
+                                                       optimal_discretisation=concatenated_xnew_discretisation,
+                                                       x_new=X)
+        else:
+            # return cKG evaluated using MC
+            kg_value = self.compute_mc_kg_values(X_discretisation, fantasised_model)
+        return kg_value
+
+    def compute_mean_std_fantasised_model(self, X_discretisation, fantasised_model, sample_idx):
+        posterior = fantasised_model.posterior(X_discretisation)
+        mean_sample_idx_ = posterior.mean[:, :, sample_idx, :, 1:]
+        std_sample_idx_ = posterior.variance[:, :, sample_idx, :, 1:].sqrt().clamp_min(1e-9)
+        return mean_sample_idx_, std_sample_idx_
+
+    def compute_discrete_kg_values(self, model: Model, x_new: Tensor,
+                                   optimal_discretisation: Tensor,
+                                   probability_of_feasibility: Optional[Tensor] = None, ) -> Tensor:
+        """
+
+        Args:
+        xnew: A `1 x 1 x d` Tensor with `1` acquisition function evaluations of
+            `d` dimensions.
+            optimal_discretisation: num_fantasies x d Tensor. Optimal X values for each z in zvalues.
+
+        """
+        # Augment the discretisation with the designs.
+        # fix dimensions....work only with (n, d)
+
+        objective_model = self.get_objective_model(model)
+        # Compute posterior mean, variance, and covariance.
+        objective_posterior = objective_model.posterior(optimal_discretisation, observation_noise=False)
+
+        objective_mean = objective_posterior.mean
+        objective_variance = objective_posterior.variance.clamp_min(1e-9)  # (1, )
+        objective_noise_variance = self.get_objective_noise(objective_model)  # check this
+        objective_posterior_covariance = (
+            objective_posterior.mvn.covariance_matrix
+        )  # (1 + num_X_disc , 1 + num_X_disc ) # check this.
+
+        objective_posterior_cov_xnew_discretisation = objective_posterior_covariance[: len(x_new),
+                                                      :].reshape(-1, 1)  # ( 1 + num_X_disc,)
+
+        full_predictive_covariance = (objective_posterior_cov_xnew_discretisation / (
+                objective_variance + objective_noise_variance).sqrt())
+
+        if probability_of_feasibility is None:
+            probability_of_feasibility = torch.ones(objective_mean.shape)
+
+        mask = torch.abs(probability_of_feasibility) > 0.0000000001
+        if torch.all(torch.logical_not(probability_of_feasibility)):
+            kgval = torch.zeros((1, 1), requires_grad=True)
+            kgval.grad = torch.zeros_like(kgval)
+            return kgval
+        return self.kgcb(a=objective_mean[mask] * probability_of_feasibility[mask],
+                         b=full_predictive_covariance[mask] * probability_of_feasibility[mask])
+
+    def compute_probability_of_feasibility(self, mean_constraints, sigma_constraints):
+        limits = torch.zeros(mean_constraints.shape)
+        z = (limits - mean_constraints) / sigma_constraints
+        probability_feasibility = torch.distributions.Normal(0, 1).cdf(z).prod(dim=-1)
+        return probability_feasibility
+
+    def get_objective_model(self, models: ModelListGP):
+        return models.models[0]
+
+    def get_constraints_model(self, models: ModelListGP):
+        return ModelListGP(*models.models[1:])
+
+    def get_objective_noise(self, model):
+        return torch.unique(model.likelihood.noise_covar.noise)
+
+    def kgcb(self, a: Tensor, b: Tensor) -> Tensor:
+        r"""
+        Calculates the linear epigraph, i.e. the boundary of the set of points
+        in 2D lying above a collection of straight lines y=a+bx.
+        Parameters
+        ----------
+        a
+            Vector of intercepts describing a set of straight lines
+        b
+            Vector of slopes describing a set of straight lines
+        Returns
+        -------
+        KGCB
+            average height of the epigraph
+        """
+
+        a = a.squeeze()
+        b = b.squeeze()
+        assert len(a) > 0, "must provide slopes"
+        assert len(a) == len(b), f"#intercepts != #slopes, {len(a)}, {len(b)}"
+
+        maxa = torch.max(a)
+
+        if torch.all(torch.abs(b) < 0.000000001):
+            kgval = torch.zeros((1, 1), requires_grad=True)
+            kgval.grad = torch.zeros_like(kgval)
+            return kgval
+
+        # Order by ascending b and descending a. There should be an easier way to do this
+        # but it seems that pytorch sorts everything as a 1D Tensor
+
+        ab_tensor = torch.vstack([-a, b]).T
+        ab_tensor_sort_a = ab_tensor[ab_tensor[:, 0].sort()[1]]
+        ab_tensor_sort_b = ab_tensor_sort_a[ab_tensor_sort_a[:, 1].sort()[1]]
+        a = -ab_tensor_sort_b[:, 0]
+        b = ab_tensor_sort_b[:, 1]
+
+        # exclude duplicated b (or super duper similar b)
+        threshold = (b[-1] - b[0]) * 0.00001
+        diff_b = b[1:] - b[:-1]
+        keep = diff_b > threshold
+        keep = torch.cat([torch.Tensor([True]), keep])
+        keep[torch.argmax(a)] = True
+        keep = keep.bool()  # making sure 0 1's are transformed to booleans
+
+        a = a[keep]
+        b = b[keep]
+
+        # initialize
+        idz = [0]
+        i_last = 0
+        x = [-torch.inf]
+
+        n_lines = len(a)
+        while i_last < n_lines - 1:
+            i_mask = torch.arange(i_last + 1, n_lines)
+            x_mask = -(a[i_last] - a[i_mask]) / (b[i_last] - b[i_mask])
+
+            best_pos = torch.argmin(x_mask)
+            idz.append(i_mask[best_pos])
+            x.append(x_mask[best_pos])
+
+            i_last = idz[-1]
+
+        x.append(torch.inf)
+
+        x = torch.Tensor(x)
+        idz = torch.LongTensor(idz)
+        # found the epigraph, now compute the expectation
+        a = a[idz]
+        b = b[idz]
+
+        normal = torch.distributions.Normal(torch.zeros_like(x), torch.ones_like(x))
+
+        pdf = torch.exp(normal.log_prob(x))
+        cdf = normal.cdf(x)
+
+        kg = torch.sum(a * (cdf[1:] - cdf[:-1]) + b * (pdf[:-1] - pdf[1:]))
+        kg -= maxa
+        return kg
+
+    def compute_mc_kg_values(self, X: Tensor, model: Model) -> Tensor:
+        with torch.enable_grad():
+            bestvals = model(X)
+        bestval_sample = bestvals.max(dim=0)[0]
+        kgvals = bestval_sample.mean(dim=0)
+        return kgvals
+
+    def compute_optimized_X_discretisation(self, X):
+        fantasy_model = self.model.fantasize(X=X, sampler=self.sampler,
+                                             evaluation_mask=self.construct_evaluation_mask(X))
+        bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
+        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasy_model, penalty_value=self.penalty_value)
+        batch_shape = constrained_posterior_mean_model.model.batch_shape
+        raw_points = draw_sobol_samples(bounds=bounds,
+                                        n=self.number_of_raw_points,
+                                        q=1,
+                                        batch_shape=batch_shape,
+                                        seed=self.seed)
+        best_location_adapted_dimensions = self.adapt_x_location_dim(self.x_best_location, batch_shape)
+        restart_points = initialize_q_batch(X=raw_points,
+                                            Y=constrained_posterior_mean_model(raw_points),
+                                            n=self.number_of_restarts, eta=2.0)
+        restart_points = torch.cat([restart_points, best_location_adapted_dimensions], dim=0)
+        with torch.enable_grad():
+            bestx, _ = gen_candidates_torch(initial_conditions=restart_points,
+                                            acquisition_function=constrained_posterior_mean_model,
+                                            lower_bounds=bounds[0],
+                                            upper_bounds=bounds[1],
+                                            options={"maxiter": 100})
+        return bestx, fantasy_model
+
+    def adapt_x_location_dim(self, X, batch_shape):
+        best_location_adapted_dimensions = torch.ones(1, *batch_shape, 1, len(self.x_best_location))
+        best_location_adapted_dimensions[..., :] = X
+        return best_location_adapted_dimensions
 
 
 class DecoupledConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, MCAcquisitionFunction):
