@@ -97,6 +97,7 @@ class OptimizationLoop:
             )
             self.save_parameters(train_x=train_x,
                                  train_y=train_y,
+                                 model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location=best_observed_location,
                                  best_predicted_location_value=self.evaluate_location_true_quality(
                                      best_observed_location),
@@ -110,12 +111,13 @@ class OptimizationLoop:
         end = time.time() - start_time
         print(f'Total time: {end} seconds')
 
-    def save_parameters(self, train_x, train_y, best_predicted_location,
-                        best_predicted_location_value, acqf_recommended_output_index, acqf_recommended_location,
-                        acqf_recommended_location_true_value, acqf_values=None):
-
+    def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
+                        acqf_recommended_output_index, acqf_recommended_location, acqf_recommended_location_true_value,
+                        model_length_scales,
+                        acqf_values=None):
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
+        self.results.save_model_length_scales(model_length_scales)
         self.results.save_input_data(train_x)
         self.results.save_output_data(train_y)
         self.results.save_acqf_values(acqf_values)
@@ -291,15 +293,15 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                         i = size
                 else:
                     # print(evaluation_order[i]+1)
-                    new_y = self.evaluate_black_box_func(new_x, evaluation_order[i]+1)
-                    train_x[evaluation_order[i]+1] = torch.cat([train_x[evaluation_order[i]+1], new_x])
-                    train_y[evaluation_order[i]+1] = torch.cat([train_y[evaluation_order[i]+1], new_y])
+                    new_y = self.evaluate_black_box_func(new_x, evaluation_order[i] + 1)
+                    train_x[evaluation_order[i] + 1] = torch.cat([train_x[evaluation_order[i] + 1], new_x])
+                    train_y[evaluation_order[i] + 1] = torch.cat([train_y[evaluation_order[i] + 1], new_y])
                     model = self.update_model(X=train_x, y=train_y)
-                    evaluated_idx.append(evaluation_order[i]+1)
+                    evaluated_idx.append(evaluation_order[i] + 1)
                     if new_y < 0:
-                        i=i+1
+                        i = i + 1
                     else:
-                        k = i+1
+                        k = i + 1
                         i = size
             if i == size - 1 and j == 0:
                 # print(0)
@@ -318,6 +320,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
             print(f'Evaluated functions: {evaluated_idx}')
             self.save_parameters(train_x=train_x,
                                  train_y=train_y,
+                                 model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location=best_observed_location,
                                  best_predicted_location_value=self.evaluate_location_true_quality(
                                      best_observed_location),
@@ -331,12 +334,13 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
         end = time.time() - start_time
         print(f'Total time: {end} seconds')
 
-    def save_parameters(self, train_x, train_y, best_predicted_location,
-                        best_predicted_location_value, acqf_recommended_location,
-                        acqf_recommended_location_true_value, failing_constraint, func_evals):
+    def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
+                        acqf_recommended_location, acqf_recommended_location_true_value, failing_constraint, func_evals,
+                        **kwargs):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
+        self.results.save_model_length_scales(kwargs["model_length_scales"])
         self.results.save_input_data(train_x)
         self.results.save_output_data(train_y)
         self.results.save_number_initial_points(self.number_initial_designs)
@@ -354,7 +358,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
             acq_function=acquisition_function,
             bounds=self.bounds,
             q=1,
-            num_restarts=15, # can make smaller if too slow, not too small though
+            num_restarts=15,  # can make smaller if too slow, not too small though
             raw_samples=72,  # used for intialization heuristic
             options={"maxiter": 100},
         )
@@ -428,12 +432,10 @@ class EI_OptimizationLoop(OptimizationLoop):
                     best_observed_location.numpy()) + " current sample decision x: " + str(new_x.numpy()), end="\n"
             )
 
-            self.save_parameters(train_x=train_x,
-                                 train_y=train_y,
-                                 best_predicted_location=best_observed_location,
+            self.save_parameters(train_x=train_x, train_y=train_y, best_predicted_location=best_observed_location,
+                                 model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location_value=self.evaluate_location_true_quality(
-                                     best_observed_location),
-                                 acqf_recommended_location=new_x,
+                                     best_observed_location), acqf_recommended_location=new_x,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x))
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
@@ -441,12 +443,12 @@ class EI_OptimizationLoop(OptimizationLoop):
         end = time.time() - start_time
         print(f'Total time: {end} seconds')
 
-    def save_parameters(self, train_x, train_y, best_predicted_location,
-                        best_predicted_location_value, acqf_recommended_location,
-                        acqf_recommended_location_true_value):
+    def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
+                        acqf_recommended_location, acqf_recommended_location_true_value, **kwargs):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
+        self.results.save_model_length_scales(kwargs["model_length_scales"])
         self.results.save_input_data(train_x)
         self.results.save_output_data(train_y)
         self.results.save_number_initial_points(self.number_initial_designs)
@@ -462,7 +464,7 @@ class EI_OptimizationLoop(OptimizationLoop):
             acq_function=acquisition_function,
             bounds=self.bounds,
             q=1,
-            num_restarts=15, # can make smaller if too slow, not too small though
+            num_restarts=15,  # can make smaller if too slow, not too small though
             raw_samples=72,  # used for intialization heuristic
             options={"maxiter": 100},
         )
@@ -484,6 +486,7 @@ class EI_OptimizationLoop(OptimizationLoop):
                 return x_smart_optimised[None, :], x_smart_optimised_val
 
         return x_optimised, kgvalue
+
 
 class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
 
@@ -551,29 +554,28 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
                     new_x.numpy()) + f" on task {index}", end="\n"
             )
 
-            self.save_parameters(train_x=train_x,
-                                 train_y=train_y,
-                                 best_predicted_location=best_observed_location,
+            self.save_parameters(train_x=train_x, train_y=train_y, best_predicted_location=best_observed_location,
+                                 model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location_value=self.evaluate_location_true_quality(
-                                     best_observed_location),
+                                     best_observed_location), acqf_recommended_output_index=index,
                                  acqf_recommended_location=new_x,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),
-                                 failing_constraint="None",  # last one gives index of failing constraint
-                                 acqf_recommended_output_index=index)
+                                 failing_constraint="None")
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
         end = time.time() - start_time
         print(f'Total time: {end} seconds')
 
-    def save_parameters(self, train_x, train_y, best_predicted_location,
-                        best_predicted_location_value, acqf_recommended_output_index, acqf_recommended_location,
-                        acqf_recommended_location_true_value, failing_constraint):
+    def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
+                        acqf_recommended_output_index, acqf_recommended_location, acqf_recommended_location_true_value,
+                        failing_constraint, **kwargs):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
         self.results.save_input_data(train_x)
         self.results.save_output_data(train_y)
+        self.results.save_model_length_scales(kwargs["model_length_scales"])
         self.results.save_number_initial_points(self.number_initial_designs)
         self.results.save_performance_type(self.performance_type)
         self.results.save_best_predicted_location(best_predicted_location)
@@ -590,7 +592,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
             acq_function=acquisition_function,
             bounds=self.bounds,
             q=1,
-            num_restarts=15, # can make smaller if too slow, not too small though
+            num_restarts=15,  # can make smaller if too slow, not too small though
             raw_samples=72,  # used for intialization heuristic
             options={"maxiter": 100},
         )

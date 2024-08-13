@@ -11,6 +11,7 @@ class Results():
         self.performance_type = None
         self.number_initial_samples = None
         self.budget = None
+        self.model_length_scales = []
         self.acqf_values = []
         self.best_predicted_location = []
         self.best_predicted_location_true_value = []
@@ -62,6 +63,12 @@ class Results():
     def save_evaluated_functions(self, evals):
         self.evals.append(evals)
 
+    def save_acqf_values(self, acqf_values):
+        self.acqf_values.append(acqf_values)
+
+    def save_model_length_scales(self, model_length_scales):
+        self.model_length_scales.append(model_length_scales)
+
     def generate_pkl_file(self):
         # Create a directory called 'results' if it doesn't exist
         results_dir = 'results'
@@ -81,6 +88,7 @@ class Results():
     def _build_results_dict(self):
         return {"path": self.filepath,
                 "filename": self.filename,
+                "model_lengthscales": self.model_length_scales,
                 "number_initial_designs": self.number_initial_samples,
                 "budget": self.budget,
                 "performance_type": self.performance_type,
@@ -94,6 +102,3 @@ class Results():
                 "acqf_recommended_output_index:": self.acqf_recommended_output_index,
                 "failing_index:": self.failing_constraint,
                 "evaluated_functions": self.evals}
-
-    def save_acqf_values(self, acqf_values):
-        self.acqf_values.append(acqf_values)
