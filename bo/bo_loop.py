@@ -230,13 +230,33 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
         model = self.update_model(train_x, train_y)
 
         start_time = time.time()
-        for iteration in range(self.budget):
-            best_observed_location, best_observed_value = self.best_observed(
+        batch_n = 0
+        while self.budget != 0:
+            def batch_run(iteration, best_observed_value, best_observed_location, new_x, train_x, train_y):
+                print(
+                    f"\nBatch{iteration:>2} finished: best value (EI) = "
+                    f"({best_observed_value:>4.5f}), best location " + str(
+                        best_observed_location.numpy()) + " current sample decision x: " + str(new_x.numpy()), end="\n"
+                )
+                self.save_parameters(train_x=train_x,
+                                 train_y=train_y,
+                                 best_predicted_location=best_observed_location,
+                                 best_predicted_location_value=self.evaluate_location_true_quality(
+                                     best_observed_location),
+                                 acqf_recommended_location=new_x,
+                                 acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),)
+
+            def update_best(train_x, train_y, model): 
+                best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,
                 train_x=train_x,
                 train_y=train_y,
                 model=model,
                 bounds=self.bounds)
+                
+                return best_observed_location, best_observed_value
+            
+            best_observed_location, best_observed_value = update_best(train_x, train_y, model)
             best_observed_all_sampled.append(best_observed_value)
 
             acquisition_function = acquisition_function_factory(model=model,
@@ -246,7 +266,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                                                                 idx=1,
                                                                 number_of_outputs=self.number_of_outputs,
                                                                 penalty_value=self.penalty_value,
-                                                                iteration=iteration,
+                                                                iteration=None,
                                                                 initial_condition_internal_optimizer=best_observed_location)
             new_x, _ = self.compute_next_sample(acquisition_function=acquisition_function,
                                                 smart_initial_locations=best_observed_location)
@@ -272,6 +292,11 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                     train_x[evaluation_order[i] + 1] = torch.cat([train_x[evaluation_order[i] + 1], new_x])
                     train_y[evaluation_order[i] + 1] = torch.cat([train_y[evaluation_order[i] + 1], new_y])
                     model = self.update_model(X=train_x, y=train_y)
+                    batch_n += 1
+                    self.budget -= 1
+                    batch_run(batch_n, best_observed_value, best_observed_location, new_x, train_x, train_y)
+                    best_observed_location, best_observed_value = update_best(train_x, train_y, model)
+                    best_observed_all_sampled.append(best_observed_value)
                     evaluated_idx.append(evaluation_order[i] + 1)
                     if new_y < 0:
                         i = i + 1
@@ -284,6 +309,11 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                     train_x[0] = torch.cat([train_x[0], new_x])
                     train_y[0] = torch.cat([train_y[0], new_y])
                     model = self.update_model(X=train_x, y=train_y)
+                    batch_n += 1
+                    self.budget -= 1
+                    batch_run(batch_n, best_observed_value, best_observed_location, new_x, train_x, train_y)
+                    best_observed_location, best_observed_value = update_best(train_x, train_y, model)
+                    best_observed_all_sampled.append(best_observed_value)
                     evaluated_idx.append(0)
                     j = 1
                     if new_y < best_observed_value:
@@ -295,6 +325,11 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                     train_x[evaluation_order[i]+1] = torch.cat([train_x[evaluation_order[i]+1], new_x])
                     train_y[evaluation_order[i]+1] = torch.cat([train_y[evaluation_order[i]+1], new_y])
                     model = self.update_model(X=train_x, y=train_y)
+                    batch_n += 1
+                    self.budget -= 1
+                    batch_run(batch_n, best_observed_value, best_observed_location, new_x, train_x, train_y)
+                    best_observed_location, best_observed_value = update_best(train_x, train_y, model)
+                    best_observed_all_sampled.append(best_observed_value)
                     evaluated_idx.append(evaluation_order[i]+1)
                     if new_y < 0:
                         i=i+1
@@ -307,24 +342,12 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                 train_x[0] = torch.cat([train_x[0], new_x])
                 train_y[0] = torch.cat([train_y[0], new_y])
                 model = self.update_model(X=train_x, y=train_y)
+                batch_n += 1
+                self.budget -= 1
+                batch_run(batch_n, best_observed_value, best_observed_location, new_x, train_x, train_y)
+                best_observed_location, best_observed_value = update_best(train_x, train_y, model)
+                best_observed_all_sampled.append(best_observed_value)
                 evaluated_idx.append(0)
-
-            print(
-                f"\nBatch{iteration:>2} finished: best value (EI) = "
-                f"({best_observed_value:>4.5f}), best location " + str(
-                    best_observed_location.numpy()) + " current sample decision x: " + str(new_x.numpy()), end="\n"
-            )
-
-            print(f'Evaluated functions: {evaluated_idx}')
-            self.save_parameters(train_x=train_x,
-                                 train_y=train_y,
-                                 best_predicted_location=best_observed_location,
-                                 best_predicted_location_value=self.evaluate_location_true_quality(
-                                     best_observed_location),
-                                 acqf_recommended_location=new_x,
-                                 acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),
-                                 failing_constraint=(k),
-                                 func_evals=evaluated_idx)  # last one gives index of failing constraint
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
@@ -333,7 +356,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
 
     def save_parameters(self, train_x, train_y, best_predicted_location,
                         best_predicted_location_value, acqf_recommended_location,
-                        acqf_recommended_location_true_value, failing_constraint, func_evals):
+                        acqf_recommended_location_true_value):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
@@ -345,8 +368,6 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
         self.results.save_best_predicted_location_true_value(best_predicted_location_value)
         self.results.save_acqf_recommended_location(acqf_recommended_location)
         self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
-        self.results.save_failing_constraint(failing_constraint)
-        self.results.save_evaluated_functions(func_evals)
         self.results.generate_pkl_file()
 
     def compute_next_sample(self, acquisition_function, smart_initial_locations=None):
