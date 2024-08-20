@@ -231,7 +231,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
 
         start_time = time.time()
         batch_n = 0
-        while self.budget != 0:
+        while self.budget > 0:
             def batch_run(iteration, best_observed_value, best_observed_location, new_x, train_x, train_y):
                 print(
                     f"\nBatch{iteration:>2} finished: best value (EI) = "
