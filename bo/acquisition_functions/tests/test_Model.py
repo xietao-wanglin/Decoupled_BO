@@ -236,6 +236,24 @@ class TestBraninFunctionNew(BotorchTestCase):
      plt.colorbar()
      plt.show()
 
+class TestMisteryFunctionNew(BotorchTestCase):
+    def test_shape(self):
+     problem = MysteryFunction(noise_std=1e-5, negate=True)
+     d = 2
+     n_points = 40000
+     train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
+     test_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
+     evalu = problem.evaluate_black_box(test_X)
+     plt.scatter(test_X[:, 0], test_X[:, 1], c=evalu[:, 0], alpha=0.2)
+     evalu = problem.evaluate_black_box(train_X)
+     test_optimum = torch.tensor([0.5515455756386866, 0.4728209571786274], dtype=dtype)
+
+     unfeas_x = train_X[evalu[:, 1] >= 0]
+     feasy = evalu[:, 0][evalu[:, 1] < 0]
+     plt.scatter(unfeas_x[:, 0], unfeas_x[:, 1], color="grey")
+     plt.colorbar()
+     plt.show()
+
 
 class TestBraninFunctionNew(BotorchTestCase):
 

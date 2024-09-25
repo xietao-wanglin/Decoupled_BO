@@ -2,16 +2,18 @@ from typing import Optional
 
 import torch
 from botorch.acquisition import ConstrainedMCObjective
+from gpytorch import settings
 
 from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType
 from bo.bo_loop import OptimizationLoop
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper
 from bo.result_utils.result_container import Results
-from bo.constrained_functions.synthetic_problems import ConstrainedBranin
 from bo.synthetic_test_functions.synthetic_test_functions import MysteryFunction
 
 device = torch.device("cpu")
 dtype = torch.double
+torch.set_default_dtype(dtype)
+settings.min_fixed_noise._global_double_value = 1e-09
 
 
 def obj_callable(Z: torch.Tensor, X: Optional[torch.Tensor] = None):
@@ -26,7 +28,7 @@ def constraint_callable_wrapper(constraint_idx):
 
 
 if __name__ == "__main__":
-    
+
     # Note: the launcher assumes that all inequalities are less than and the limit of the constraint is zero.
     # Transform accordingly in the problem.
     # TODO: Launcher should be adapted to run different problems and random seeds....

@@ -420,11 +420,12 @@ class EI_OptimizationLoop(OptimizationLoop):
                 new_y = self.evaluate_black_box_func(new_x, i)
                 train_x[i] = torch.cat([train_x[i], new_x])
                 train_y[i] = torch.cat([train_y[i], new_y])
-                model = self.update_model(X=train_x, y=train_y)
+            model = self.update_model(X=train_x, y=train_y)
 
+            true_vals = self.evaluate_location_true_quality(best_observed_location).numpy()
             print(
                 f"\nBatch{iteration:>2} finished: best value (EI) = "
-                f"({best_observed_value:>4.5f}), best location " + str(
+                f"({true_vals[0]:>4.5f}), best location " + str(
                     best_observed_location.numpy()) + " current sample decision x: " + str(new_x.numpy()), end="\n"
             )
 
@@ -462,27 +463,29 @@ class EI_OptimizationLoop(OptimizationLoop):
             acq_function=acquisition_function,
             bounds=self.bounds,
             q=1,
-            num_restarts=15, # can make smaller if too slow, not too small though
-            raw_samples=72,  # used for intialization heuristic
-            options={"maxiter": 100},
+            num_restarts=8, # can make smaller if too slow, not too small though
+            raw_samples=100,  # used for intialization heuristic
+            options={"maxiter": 100}
         )
         # observe new values
         x_optimised = candidates.detach()
         x_optimised_val = kgvalue.detach()
         if smart_initial_locations is not None:
-            candidates, kgvalue = optimize_acqf(
-                acq_function=acquisition_function,
-                bounds=self.bounds,
-                num_restarts=smart_initial_locations.shape[0],
-                batch_initial_conditions=smart_initial_locations,
-                q=1,
-                options={"maxiter": 100}
+            candidates, kgvalue = gen_candidates_scipy(
+                acquisition_function=acquisition_function,
+                lower_bounds=self.bounds[0],
+                upper_bounds=self.bounds[1],
+                initial_conditions=smart_initial_locations,
+                options={ "maxiter": 100}
             )
             x_smart_optimised = candidates.detach()
             x_smart_optimised_val = kgvalue.detach()
+            print("kg candidates, ", x_optimised_val, " kg best place ", x_smart_optimised_val)
             if x_smart_optimised_val >= x_optimised_val:
-                return x_smart_optimised[None, :], x_smart_optimised_val
-
+                print("current posterior mean won")
+                print("initial guess was" , smart_initial_locations)
+                print("won this location, ", x_smart_optimised)
+                return x_smart_optimised, x_smart_optimised_val
         return x_optimised, kgvalue
 
 class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
