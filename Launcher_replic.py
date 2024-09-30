@@ -1,8 +1,6 @@
-from typing import Optional
-
 from botorch.acquisition import ConstrainedMCObjective
+from gpytorch import settings
 
-from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType
 from bo.bo_loop import *
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper
 from bo.result_utils.result_container import Results
@@ -10,7 +8,8 @@ from bo.synthetic_test_functions.synthetic_test_functions import *
 
 device = torch.device("cpu")
 dtype = torch.double
-
+torch.set_default_dtype(dtype)
+settings.min_fixed_noise._global_double_value = 1e-09
 
 def obj_callable(Z: torch.Tensor, X: Optional[torch.Tensor] = None):
     return Z[..., 0]

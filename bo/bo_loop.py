@@ -9,7 +9,8 @@ from botorch.optim import optimize_acqf
 from botorch.test_functions.base import BaseTestProblem
 from torch import Tensor
 
-from bo.acquisition_functions.acquisition_functions import acquisition_function_factory, AcquisitionFunctionType
+from bo.acquisition_functions.acquisition_functions import acquisition_function_factory, AcquisitionFunctionType, \
+    DecopledHybridConstrainedKnowledgeGradient
 from bo.model.Model import ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper
 from bo.result_utils.result_container import Results
 
@@ -182,7 +183,7 @@ class OptimizationLoop:
         return argmax_mean, max_mean
 
     def compute_next_sample(self, acquisition_function, smart_initial_locations=None):
-        candidates, _ = optimize_acqf(
+        candidates, acqf_value = optimize_acqf(
             acq_function=acquisition_function,
             bounds=self.bounds,
             gen_candidates=gen_candidates_scipy,
@@ -193,11 +194,11 @@ class OptimizationLoop:
         )
         # observe new values
         x_optimised = candidates.detach()
-        x_optimised_val = acquisition_function.evaluate_kg_value(x_optimised,
-                                                                 number_of_restarts=20,
-                                                                 number_of_raw_points=128).detach()
+        x_optimised_val = acqf_value.detach()
         if smart_initial_locations is not None:
-            candidates, _ = optimize_acqf(
+            if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
+                acquisition_function.set_scipy_as_internal_optimizer()
+            candidates, kgvalue = optimize_acqf(
                 acq_function=acquisition_function,
                 bounds=self.bounds,
                 num_restarts=smart_initial_locations.shape[0],
@@ -206,13 +207,10 @@ class OptimizationLoop:
                 options={"maxiter": 100}
             )
             x_smart_optimised = candidates.detach()
-            x_smart_optimised_val = acquisition_function.evaluate_kg_value(x_smart_optimised[None, :],
-                                                                           number_of_restarts=20,
-                                                                           number_of_raw_points=128).detach()
+            x_smart_optimised_val = acqf_value.detach()
             if x_smart_optimised_val >= x_optimised_val:
-                return x_smart_optimised[None, :], x_smart_optimised_val
-
-        return x_optimised, x_optimised_val
+                return torch.atleast_2d(x_smart_optimised), x_smart_optimised_val
+        return torch.atleast_2d(x_optimised), acqf_value
 
 
 class EI_Decoupled_OptimizationLoop(OptimizationLoop):
@@ -472,6 +470,8 @@ class EI_OptimizationLoop(OptimizationLoop):
         x_optimised = candidates.detach()
         x_optimised_val = kgvalue.detach()
         if smart_initial_locations is not None:
+            if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
+                acquisition_function.set_scipy_as_internal_optimizer()
             candidates, kgvalue = optimize_acqf(
                 acq_function=acquisition_function,
                 bounds=self.bounds,
@@ -483,9 +483,8 @@ class EI_OptimizationLoop(OptimizationLoop):
             x_smart_optimised = candidates.detach()
             x_smart_optimised_val = kgvalue.detach()
             if x_smart_optimised_val >= x_optimised_val:
-                return x_smart_optimised[None, :], x_smart_optimised_val
-
-        return x_optimised, kgvalue
+                return torch.atleast_2d(x_smart_optimised), x_smart_optimised_val
+        return torch.atleast_2d(x_optimised), kgvalue
 
 
 class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):

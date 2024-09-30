@@ -1,18 +1,19 @@
 from typing import Optional
-import sys
 
-import torch
 from botorch.acquisition import ConstrainedMCObjective
+from gpytorch import settings
 
 from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType
-from bo.bo_loop import OptimizationLoop, EI_Decoupled_OptimizationLoop, EI_OptimizationLoop, Decoupled_EIKG_OptimizationLoop
+from bo.bo_loop import OptimizationLoop, EI_Decoupled_OptimizationLoop, EI_OptimizationLoop, \
+    Decoupled_EIKG_OptimizationLoop
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper
 from bo.result_utils.result_container import Results
-from bo.constrained_functions.synthetic_problems import ConstrainedBranin
 from bo.synthetic_test_functions.synthetic_test_functions import *
 
 device = torch.device("cpu")
 dtype = torch.double
+torch.set_default_dtype(dtype)
+settings.min_fixed_noise._global_double_value = 1e-09
 
 
 def obj_callable(Z: torch.Tensor, X: Optional[torch.Tensor] = None):
@@ -54,16 +55,16 @@ if __name__ == "__main__":
         )
         results = Results(filename=filename_pf + "dckg" + str(seed) + ".pkl")
         loop_dckg = OptimizationLoop(black_box_func=black_box_function,
-                                objective=constrained_obj,
-                                ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
-                                bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
-                                performance_type="model",
-                                model=model,
-                                seed=seed,
-                                budget=budget,
-                                number_initial_designs=6,
-                                results=results,
-                                penalty_value=torch.tensor([penalty]))
+                                     objective=constrained_obj,
+                                     ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
+                                     bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
+                                     performance_type="model",
+                                     model=model,
+                                     seed=seed,
+                                     budget=budget,
+                                     number_initial_designs=6,
+                                     results=results,
+                                     penalty_value=torch.tensor([penalty]))
         loop_dckg.run()
 
     # EI + KG
@@ -76,16 +77,17 @@ if __name__ == "__main__":
         )
         results = Results(filename=filename_pf + "eikg" + str(seed) + ".pkl")
         loop_eikg = Decoupled_EIKG_OptimizationLoop(black_box_func=black_box_function,
-                                objective=constrained_obj,
-                                ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
-                                bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
-                                performance_type="model",
-                                model=model,
-                                seed=seed,
-                                budget=budget,
-                                number_initial_designs=6,
-                                results=results,
-                                penalty_value=torch.tensor([penalty]))
+                                                    objective=constrained_obj,
+                                                    ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
+                                                    bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device,
+                                                                        dtype=dtype),
+                                                    performance_type="model",
+                                                    model=model,
+                                                    seed=seed,
+                                                    budget=budget,
+                                                    number_initial_designs=6,
+                                                    results=results,
+                                                    penalty_value=torch.tensor([penalty]))
         loop_eikg.run()
 
     # Decoupled EI
@@ -98,16 +100,17 @@ if __name__ == "__main__":
         )
         results = Results(filename=filename_pf + "dei" + str(seed) + ".pkl")
         loop_dei = EI_Decoupled_OptimizationLoop(black_box_func=black_box_function,
-                                objective=constrained_obj,
-                                ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
-                                bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
-                                performance_type="model",
-                                model=model,
-                                seed=seed,
-                                budget=budget,
-                                number_initial_designs=6,
-                                results=results,
-                                penalty_value=torch.tensor([penalty]))
+                                                 objective=constrained_obj,
+                                                 ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
+                                                 bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device,
+                                                                     dtype=dtype),
+                                                 performance_type="model",
+                                                 model=model,
+                                                 seed=seed,
+                                                 budget=budget,
+                                                 number_initial_designs=6,
+                                                 results=results,
+                                                 penalty_value=torch.tensor([penalty]))
         loop_dei.run()
 
     # Coupled EI
@@ -120,16 +123,16 @@ if __name__ == "__main__":
         )
         results = Results(filename=filename_pf + "cei" + str(seed) + ".pkl")
         loop_cei = EI_OptimizationLoop(black_box_func=black_box_function,
-                                objective=constrained_obj,
-                                ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
-                                bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
-                                performance_type="model",
-                                model=model,
-                                seed=seed,
-                                budget=int(budget/(num_constraints+1)),
-                                number_initial_designs=6,
-                                results=results,
-                                penalty_value=torch.tensor([penalty]))
+                                       objective=constrained_obj,
+                                       ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
+                                       bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
+                                       performance_type="model",
+                                       model=model,
+                                       seed=seed,
+                                       budget=int(budget / (num_constraints + 1)),
+                                       number_initial_designs=6,
+                                       results=results,
+                                       penalty_value=torch.tensor([penalty]))
         loop_cei.run()
 
     # Coupled cKG
@@ -142,14 +145,14 @@ if __name__ == "__main__":
         )
         results = Results(filename=filename_pf + "ckg" + str(seed) + ".pkl")
         loop_ckg = EI_OptimizationLoop(black_box_func=black_box_function,
-                                objective=constrained_obj,
-                                ei_type=AcquisitionFunctionType.MC_CONSTRAINED_KNOWLEDGE_GRADIENT,
-                                bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
-                                performance_type="model",
-                                model=model,
-                                seed=seed,
-                                budget=int(budget/(num_constraints+1)),
-                                number_initial_designs=6,
-                                results=results,
-                                penalty_value=torch.tensor([penalty]))
+                                       objective=constrained_obj,
+                                       ei_type=AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
+                                       bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype),
+                                       performance_type="model",
+                                       model=model,
+                                       seed=seed,
+                                       budget=int(budget / (num_constraints + 1)),
+                                       number_initial_designs=6,
+                                       results=results,
+                                       penalty_value=torch.tensor([penalty]))
         loop_ckg.run()
