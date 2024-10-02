@@ -100,5 +100,6 @@ class Results():
                 "acqf_recommended_location": self.acqf_recommended_location,
                 "acqf_recommended_location_value": self.acqf_recommended_location_value,
                 "acqf_recommended_output_index:": self.acqf_recommended_output_index,
+                "acqf_values":self.acqf_values,
                 "failing_index:": self.failing_constraint,
                 "evaluated_functions": self.evals}
