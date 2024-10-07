@@ -244,17 +244,12 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                                         q=1,
                                         batch_shape=batch_shape,
                                         seed=self.seed)
-        if (self.evaluate_all_sources is False) and (self.source_index != 0):
-            raw_points = torch.cat([raw_points, best_location_adapted_dimensions], dim=0)
-            restart_points = initialize_q_batch(X=raw_points,
-                                                Y=constrained_posterior_mean_model(raw_points),
-                                                n=1, eta=2.0)
-        else:
-            restart_points = initialize_q_batch(X=raw_points,
-                                                Y=constrained_posterior_mean_model(raw_points),
-                                                n=self.number_of_restarts, eta=2.0)
 
-            restart_points = torch.cat([restart_points, best_location_adapted_dimensions], dim=0)
+        restart_points = initialize_q_batch(X=raw_points,
+                                            Y=constrained_posterior_mean_model(raw_points),
+                                            n=self.number_of_restarts, eta=2.0)
+
+        restart_points = torch.cat([restart_points, best_location_adapted_dimensions], dim=0)
         return restart_points, fantasy_model
 
     def precompute_feasibility(self, X, fantasised_model, squeeze_dim_=None):
@@ -425,10 +420,11 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         current_model = ConstrainedPosteriorMean(self.model, penalty_value=self.penalty_value)
         with torch.enable_grad():
             bestvals = constrained_posterior_mean_model(X)
-            assert bestvals.shape[0] == self.num_fantasies;
+            assert bestvals.shape[1] == self.num_fantasies;
             current_best_value_estimation = torch.max(current_model(X.reshape(-1, 1, X.shape[-1])))
         diff = torch.max(bestvals, current_best_value_estimation) - current_best_value_estimation
-        kgvals = diff.mean(dim=0)
+        bestval_sample = diff.max(dim=0)[0]
+        kgvals = bestval_sample.mean(dim=0)
         return torch.atleast_1d(kgvals)
 
     def compute_optimized_X_discretisation(self, X):
