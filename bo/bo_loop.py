@@ -559,7 +559,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
                                      best_observed_location), acqf_recommended_output_index=index,
                                  acqf_recommended_location=new_x,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),
-                                 failing_constraint="None")
+                                 failing_constraint="None", acqf_values=kg_values_list)
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
@@ -568,7 +568,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
 
     def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
                         acqf_recommended_output_index, acqf_recommended_location, acqf_recommended_location_true_value,
-                        failing_constraint, **kwargs):
+                        failing_constraint, acqf_values, **kwargs):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
@@ -581,6 +581,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
         self.results.save_best_predicted_location_true_value(best_predicted_location_value)
         self.results.save_acqf_recommended_output_index(acqf_recommended_output_index)
         self.results.save_acqf_recommended_location(acqf_recommended_location)
+        self.results.save_acqf_values(acqf_values)
         self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
         self.results.save_failing_constraint(failing_constraint)
 
