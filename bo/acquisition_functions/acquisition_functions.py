@@ -376,7 +376,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         diff_b = b[1:] - b[:-1]
         keep = diff_b > threshold
         keep = torch.cat([torch.Tensor([True]), keep])
-        keep[torch.argmax(a)] = True
+        # keep[torch.argmax(a)] = True
         keep = keep.bool()  # making sure 0 1's are transformed to booleans
 
         a = a[keep]
@@ -388,6 +388,9 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         x = [-torch.inf]
 
         n_lines = len(a)
+        if n_lines == 1:
+            return torch.max(a) - maxa
+
         while i_last < n_lines - 1:
             i_mask = torch.arange(i_last + 1, n_lines)
             x_mask = -(a[i_last] - a[i_mask]) / (b[i_last] - b[i_mask])

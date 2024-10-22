@@ -207,7 +207,7 @@ class OptimizationLoop:
                 options={"maxiter": 100}
             )
             x_smart_optimised = candidates.detach()
-            x_smart_optimised_val = acqf_value.detach()
+            x_smart_optimised_val = kgvalue.detach()
             if x_smart_optimised_val >= x_optimised_val:
                 return torch.atleast_2d(x_smart_optimised), x_smart_optimised_val
         return torch.atleast_2d(x_optimised), acqf_value
@@ -482,7 +482,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
             if x_smart_optimised_val >= x_optimised_val:
                 return x_smart_optimised[None, :], x_smart_optimised_val
 
-        return x_optimised, kgvalue
+        return x_optimised, x_optimised_val
 
 
 class EI_OptimizationLoop(OptimizationLoop):
@@ -589,7 +589,7 @@ class EI_OptimizationLoop(OptimizationLoop):
             x_smart_optimised_val = kgvalue.detach()
             if x_smart_optimised_val >= x_optimised_val:
                 return torch.atleast_2d(x_smart_optimised), x_smart_optimised_val
-        return torch.atleast_2d(x_optimised), kgvalue
+        return torch.atleast_2d(x_optimised), x_optimised_val
 
 
 class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
@@ -718,4 +718,4 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
             if x_smart_optimised_val >= x_optimised_val:
                 return x_smart_optimised[None, :], x_smart_optimised_val
 
-        return x_optimised, kgvalue
+        return x_optimised, x_optimised_val
