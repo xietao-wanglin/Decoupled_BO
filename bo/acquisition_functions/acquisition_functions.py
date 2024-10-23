@@ -44,6 +44,26 @@ def compute_best_posterior_mean(model, bounds, objective):
     return argmax_mean, max_mean
 
 
+def filter_a_b(a, b, threshold=1e-9):
+    sorted_pairs = torch.stack(sort_a_b(a.clone(), b.clone()), dim=1)
+    filtered_pairs = [sorted_pairs[0]]
+    for i in range(1, len(sorted_pairs)):
+        if torch.abs(sorted_pairs[i][1] - sorted_pairs[i - 1][1]) > threshold:
+            filtered_pairs.append(sorted_pairs[i])
+    filtered_pairs = torch.stack(filtered_pairs)
+    final_a, final_b = filtered_pairs[:, 0], filtered_pairs[:, 1]
+    return final_a, final_b
+
+
+def sort_a_b(a, b):
+    _, a_sort_indices = torch.sort(-a)
+    sorted_indices = torch.argsort(b[a_sort_indices])
+    final_sorted_indices = a_sort_indices[sorted_indices]
+    sorted_a = a[final_sorted_indices]
+    sorted_b = b[final_sorted_indices]
+    return sorted_a, sorted_b
+
+
 def acquisition_function_factory(type, model, objective, best_value, idx, number_of_outputs, penalty_value, iteration,
                                  initial_condition_internal_optimizer):
     if type is AcquisitionFunctionType.BOTORCH_EXPECTED_IMPROVEMENT:
@@ -356,44 +376,23 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
             average height of the epigraph
         """
 
-        a = a.squeeze()
-        b = b.squeeze()
+        a = a.squeeze().clone()
+        b = b.squeeze().clone()
         assert len(a) > 0, "must provide slopes"
         assert len(a) == len(b), f"#intercepts != #slopes, {len(a)}, {len(b)}"
 
         maxa = torch.max(a)
-        # Order by ascending b and descending a. There should be an easier way to do this
-        # but it seems that pytorch sorts everything as a 1D Tensor
-
-        ab_tensor = torch.vstack([-a, b]).T
-        ab_tensor_sort_a = ab_tensor[ab_tensor[:, 0].sort()[1]]
-        ab_tensor_sort_b = ab_tensor_sort_a[ab_tensor_sort_a[:, 1].sort()[1]]
-        a = -ab_tensor_sort_b[:, 0]
-        b = ab_tensor_sort_b[:, 1]
-
         # exclude duplicated b (or super duper similar b)
-        threshold = (b[-1] - b[0]) * 0.00001
-        diff_b = b[1:] - b[:-1]
-        keep = diff_b > threshold
-        keep = torch.cat([torch.Tensor([True]), keep])
-        # keep[torch.argmax(a)] = True
-        keep = keep.bool()  # making sure 0 1's are transformed to booleans
-
-        a = a[keep]
-        b = b[keep]
-
+        threshold = 1e-12
+        a_0, b_0 = filter_a_b(a, b, threshold)
         # initialize
         idz = [0]
         i_last = 0
         x = [-torch.inf]
-
-        n_lines = len(a)
-        if n_lines == 1:
-            return torch.max(a) - maxa
-
+        n_lines = len(a_0)
         while i_last < n_lines - 1:
             i_mask = torch.arange(i_last + 1, n_lines)
-            x_mask = -(a[i_last] - a[i_mask]) / (b[i_last] - b[i_mask])
+            x_mask = -(a_0[i_last] - a_0[i_mask]) / (b_0[i_last] - b_0[i_mask])
 
             best_pos = torch.argmin(x_mask)
             idz.append(i_mask[best_pos])
@@ -406,8 +405,8 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         x = torch.Tensor(x)
         idz = torch.LongTensor(idz)
         # found the epigraph, now compute the expectation
-        a = a[idz]
-        b = b[idz]
+        a = a_0[idz]
+        b = b_0[idz]
 
         normal = torch.distributions.Normal(torch.zeros_like(x), torch.ones_like(x))
 
