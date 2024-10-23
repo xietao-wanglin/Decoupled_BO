@@ -1,31 +1,25 @@
-import pickle
 import time
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import torch
-from botorch import fit_gpytorch_mll, gen_candidates_scipy
+from botorch import fit_gpytorch_mll
 from botorch.acquisition import ConstrainedMCObjective
 from botorch.acquisition import ExpectedImprovement, qExpectedImprovement
 from botorch.models import SingleTaskGP, ModelListGP
-from botorch.models.transforms import Standardize
 from botorch.optim import optimize_acqf
 from botorch.sampling import IIDNormalSampler, SobolQMCNormalSampler, ListSampler
 from botorch.utils.testing import BotorchTestCase, MockModel, MockPosterior
 from botorch.utils.transforms import normalize
-from gpytorch import settings, ExactMarginalLogLikelihood
-from gpytorch.kernels import ScaleKernel, MaternKernel
+from gpytorch import settings
 from gpytorch.mlls import SumMarginalLogLikelihood
-from gpytorch.priors import GammaPrior
-from pip._internal.resolution.resolvelib import candidates
 
 from bo.acquisition_functions.acquisition_functions import MathsysExpectedImprovement, \
-    DecopledHybridConstrainedKnowledgeGradient
+    DecopledHybridConstrainedKnowledgeGradient, filter_a_b
 from bo.constrained_functions.synthetic_problems import testing_function, testing_function_dummy_constraint, \
     ConstrainedBranin
 from bo.model.Model import ConstrainedPosteriorMean
-from bo.samplers.samplers import quantileSampler, quantileSamplerCoupledSources, zeroSampler
-from bo.synthetic_test_functions.synthetic_test_functions import MOPTA08, MysteryFunction
+from bo.samplers.samplers import quantileSampler
+from bo.synthetic_test_functions.synthetic_test_functions import MOPTA08
 
 
 class TestMathsysExpectedImprovement(BotorchTestCase):
@@ -283,7 +277,27 @@ class TestDecoupledKG(BotorchTestCase):
                 print("output: " + str(index) + " , kg: " + str(kg_values[index]), " ,time: " + str(stop - start))
             print("seed: " + str(seed))
             print("kgvals: " + str(kg_values))
-            self.assertNotEquals(expected_decision_to_avoid, torch.argmax(kg_values))
+            self.assertNotEqual(expected_decision_to_avoid, torch.argmax(kg_values))
+
+    def test_ordering(self):
+        a = torch.tensor([1, 0, 3, 9, 4, 7, 2])
+        b = torch.tensor([2, 2, 2, 2, 3, 3, 1])
+
+        # If tie in b values, ensure ai ≤ ai+1
+        final_a, final_b = filter_a_b(a, b, 1e-9)
+
+        self.assertAllClose(final_a, torch.tensor([2, 9, 7]))
+        self.assertAllClose(final_b, torch.tensor([1, 2, 3]))
+
+    def test_ordering_same_b(self):
+        a = torch.tensor([1, 0, 3, 9, 4, 7, 2])
+        b = torch.tensor([2, 2, 2, 2, 2, 2, 2])
+
+        # If tie in b values, ensure ai ≤ ai+1
+        final_a, final_b = filter_a_b(a, b, 1e-9)
+
+        self.assertAllClose(final_a, torch.tensor([9]))
+        self.assertAllClose(final_b, torch.tensor([2]))
 
     def test_shapes_1d_single_source(self):
         torch.manual_seed(0)
@@ -500,95 +514,6 @@ class TestDecoupledKG(BotorchTestCase):
 
             kgs = acqf.forward(torch.ones(n_designs, 1, d))
             self.assertEqual(n_designs, len(kgs))
-
-
-    def test_consistency(self):
-        torch.manual_seed(0)
-        dtype = torch.double
-        torch.set_default_dtype(dtype)
-        func = MysteryFunction(noise_std=1e-06, negate=True)
-        settings.min_fixed_noise._global_double_value = 1e-09
-        d = 2
-        num_of_points = 22
-        with open('/home/jungredda/CRYPT/GITHUB_REPOS/xietaorepo/Mathsys_RG_2024/results/mystery_lots_final_ckg0.pkl', 'rb') as file:
-            data = pickle.load(file)
-        train_X = data["input_data"][-1]
-        train_X = torch.rand((num_of_points, d))
-        train_Y_objective = func(train_X).unsqueeze(dim=1)
-        train_Y_constraint = func.evaluate_slack_true(train_X).unsqueeze(dim=1)
-        NOISE = torch.tensor(1e-6, device=self.device, dtype=dtype)
-        covar_modules = ScaleKernel(
-            base_kernel=MaternKernel(
-                nu=2.5,
-                ard_num_dims=1,
-                lengthscale_prior=GammaPrior(1.0, 3.0),
-            ),
-            outputscale_prior=GammaPrior(2.0, 0.15),
-        )
-        model_objective = SingleTaskGP(train_X, train_Y_objective,
-                                       train_Yvar=NOISE.expand_as(train_Y_objective.reshape(-1, 1)),
-                                       outcome_transform=Standardize(m=1),
-                                       covar_module=covar_modules)
-        model_constraint = SingleTaskGP(train_X, train_Y_constraint,
-                                        train_Yvar=NOISE.expand_as(train_Y_constraint.reshape(-1, 1)),
-                                        covar_module=None)
-        model = ModelListGP(*[model_objective, model_constraint])
-        mll = SumMarginalLogLikelihood(model.likelihood, model)
-        fit_gpytorch_mll(mll)
-        #
-        model.posterior(torch.rand(5, 1, d), dtype=dtype)
-        objective = ConstrainedMCObjective(objective=obj_callable, constraints=[obj_callable])
-        print("started")
-        start = time.time()
-        bounds = torch.tensor([[0.0] * d, [1.0] * d], dtype=torch.double)
-        penalty_value = torch.tensor([30.0], dtype=dtype)
-        mean = ConstrainedPosteriorMean(model, maximize=True, penalty_value=penalty_value)
-        argmax_mean, max_mean = optimize_acqf(
-            acq_function=mean,
-            bounds=bounds,
-            q=1,
-            num_restarts=20,
-            raw_samples=248,
-        )
-        n_fantasised_samples = 5
-        sampler_list = ListSampler(
-            *[quantileSamplerCoupledSources(sample_shape=torch.Size([n_fantasised_samples])),
-              quantileSampler(sample_shape=torch.Size([n_fantasised_samples]))])
-        x_eval_mask = torch.ones(1, 2, dtype=torch.bool)  # 2 outputs, 1 == True
-        acqf = DecopledHybridConstrainedKnowledgeGradient(model, sampler=sampler_list,
-                                                          num_fantasies=n_fantasised_samples,
-                                                          source_index=0,
-                                                          objective=objective, number_of_raw_points=1024,
-                                                          number_of_restarts=5, X_evaluation_mask=x_eval_mask,
-                                                          seed=0, penalty_value=penalty_value,
-                                                          x_best_location=argmax_mean,
-                                                          evaluate_all_sources=True)
-
-        x_test = torch.rand((2000, 1, 2))
-        posterior_mean = mean(x_test)
-
-        candidates, kgvalue = optimize_acqf(
-            acq_function=acqf,
-            bounds=bounds,
-            q=1,
-            sequential=False,
-            num_restarts=20,  # can make smaller if too slow, not too small though
-            raw_samples=200,  # used for intialization heuristic
-            options={"maxiter": 100}
-        )
-        # candidates = torch.tensor([[[0.5611, 0.0000]]])
-        discretisation, fantasy_model = acqf.compute_optimized_X_discretisation(candidates)
-        kgvalue = acqf.compute_coupled_kg(candidates[None, :], fantasy_model, discretisation)
-        print("candidates ", candidates, "kgval", kgvalue)
-        plt.scatter(x_test[:, 0, 0], x_test[:, 0, 1], c=posterior_mean.detach())
-        plt.scatter(argmax_mean[:, 0], argmax_mean[:, 1], color="red")
-        # plt.scatter(train_X[:, 0], train_X[:, 1], color="magenta", marker="x")
-        plt.scatter(discretisation.detach().reshape(-1, 2)[:, 0], discretisation.detach().reshape(-1, 2)[:, 1], color="magenta",
-                    marker="x")
-        plt.scatter(train_X[:, 0], train_X[:, 1], c='red')
-        plt.scatter(candidates.squeeze()[0], candidates.squeeze()[1], c="red", marker="x")
-        plt.colorbar()
-        plt.show()
 
 
 def test_MOPTA08_function_optimal_values(self):
