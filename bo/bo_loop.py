@@ -267,7 +267,7 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
             print("best_coupled_value", best_ckG_value_per_cost)
             if best_ckG_value_per_cost > best_dckg_value_per_cost:
                 for task_idx in range(self.number_of_outputs):
-                    new_output = self.black_box_func.evaluate_black_box(new_x_ckg, task_idx)
+                    new_output = self.black_box_func.evaluate_black_box_func(new_x_ckg, task_idx)
                     train_x[task_idx] = torch.cat([train_x[task_idx], new_x_ckg])
                     train_y[task_idx] = torch.cat([train_y[task_idx], new_output])
                 index = -1

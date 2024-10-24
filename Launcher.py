@@ -12,7 +12,7 @@ from bo.turbo_loop import turbo_boloop
 device = torch.device("cpu")
 dtype = torch.double
 torch.set_default_dtype(dtype)
-settings.min_fixed_noise._global_double_value = 1e-09
+settings.min_fixed_noise._global_double_value = 1e-6
 
 
 def obj_callable(Z: torch.Tensor, X: Optional[torch.Tensor] = None):

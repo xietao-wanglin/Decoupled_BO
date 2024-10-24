@@ -13,7 +13,7 @@ from bo.synthetic_test_functions.synthetic_test_functions import *
 device = torch.device("cpu")
 dtype = torch.double
 torch.set_default_dtype(dtype)
-settings.min_fixed_noise._global_double_value = 1e-09
+settings.min_fixed_noise._global_double_value = 1e-6
 
 
 def obj_callable(Z: torch.Tensor, X: Optional[torch.Tensor] = None):
@@ -36,12 +36,12 @@ if __name__ == "__main__":
     budget = 240
     penalty = 40.0
 
+    DCKG_CKG = True
     DCKG = True
     EIKG = True
     DEI = True
     CEI = True
     CKG = True
-    DCKG_CKG = True
 
     seed = int(sys.argv[1])
     print(f'Running seed {seed}')
