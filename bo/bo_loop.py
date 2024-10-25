@@ -273,7 +273,8 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                 index = -1
                 kg_values_list[-1] = best_ckG_value_per_cost
             else:
-                index = torch.argmax(torch.tensor(kg_values_list) / self.costs)
+                kg_values_list[-1] = -1
+                index = torch.argmax(torch.tensor(kg_values_list[::-1]) / self.costs)
                 new_y = self.evaluate_black_box_func(new_x_list[index], index)
                 train_x[index] = torch.cat([train_x[index], new_x_list[index]])
                 train_y[index] = torch.cat([train_y[index], new_y])
