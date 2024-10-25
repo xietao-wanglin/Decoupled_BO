@@ -240,7 +240,7 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                 bounds=self.bounds)
             best_observed_all_sampled.append(best_observed_value)
 
-            kg_values_list = torch.zeros(self.number_of_outputs, dtype=dtype)
+            kg_values_list = torch.zeros(self.number_of_outputs + 1, dtype=dtype)
             new_x_list = []
             for task_idx in range(self.number_of_outputs):
                 acquisition_function = acquisition_function_factory(model=model,
@@ -257,21 +257,21 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                                                           smart_initial_locations=best_observed_location)
                 kg_values_list[task_idx] = kgvalue
                 new_x_list.append(new_x)
-                print("task_idx ", task_idx)
-                print("kg_val ", kgvalue)
+                #print("task_idx ", task_idx)
+                #print("kg_val ", kgvalue)
 
             new_x_ckg, acqf_value_ckg = self.get_best_coupled_kg_value(best_observed_location, best_observed_value, iteration, model)
             best_ckG_value_per_cost = acqf_value_ckg / (torch.sum(self.costs))
             best_dckg_value_per_cost = torch.max(torch.tensor(kg_values_list) / self.costs)
-            print("best_decoupled_value", best_dckg_value_per_cost)
-            print("best_coupled_value", best_ckG_value_per_cost)
+            #print("best_decoupled_value", best_dckg_value_per_cost)
+            #print("best_coupled_value", best_ckG_value_per_cost)
             if best_ckG_value_per_cost > best_dckg_value_per_cost:
                 for task_idx in range(self.number_of_outputs):
                     new_output = self.evaluate_black_box_func(new_x_ckg, task_idx)
                     train_x[task_idx] = torch.cat([train_x[task_idx], new_x_ckg])
                     train_y[task_idx] = torch.cat([train_y[task_idx], new_output])
                 index = -1
-                kg_values_list = [best_dckg_value_per_cost]
+                kg_values_list[-1] = best_ckG_value_per_cost
             else:
                 index = torch.argmax(torch.tensor(kg_values_list) / self.costs)
                 new_y = self.evaluate_black_box_func(new_x_list[index], index)
