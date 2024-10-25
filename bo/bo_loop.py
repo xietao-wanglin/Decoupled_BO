@@ -262,7 +262,7 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
 
             new_x_ckg, acqf_value_ckg = self.get_best_coupled_kg_value(best_observed_location, best_observed_value, iteration, model)
             best_ckG_value_per_cost = acqf_value_ckg / (torch.sum(self.costs))
-            best_dckg_value_per_cost = torch.max(torch.tensor(kg_values_list) / self.costs)
+            best_dckg_value_per_cost = torch.max(torch.tensor(kg_values_list[::-1]) / self.costs)
             #print("best_decoupled_value", best_dckg_value_per_cost)
             #print("best_coupled_value", best_ckG_value_per_cost)
             if best_ckG_value_per_cost > best_dckg_value_per_cost:
