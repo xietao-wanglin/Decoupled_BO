@@ -13,7 +13,7 @@ from bo.synthetic_test_functions.synthetic_test_functions import *
 device = torch.device("cpu")
 dtype = torch.double
 torch.set_default_dtype(dtype)
-settings.min_fixed_noise._global_double_value = 1e-09
+settings.min_fixed_noise._global_double_value = 1e-6
 
 
 def obj_callable(Z: torch.Tensor, X: Optional[torch.Tensor] = None):
@@ -36,12 +36,12 @@ if __name__ == "__main__":
     budget = 240
     penalty = 40.0
 
+    DCKG_CKG = True
     DCKG = True
     EIKG = True
-    DEI = True
+    DEI = False
     CEI = True
     CKG = True
-    DCKG_CKG = True
 
     seed = int(sys.argv[1])
     print(f'Running seed {seed}')
@@ -54,8 +54,8 @@ if __name__ == "__main__":
             objective=obj_callable,
             constraints=[constraint_callable_wrapper(idx) for idx in range(1, num_constraints + 1)],
         )
-        results = Results(filename=filename_pf + "dckg" + str(seed) + ".pkl")
-        loop_dckg = CoupledAndDecoupledOptimizationLoop(black_box_func=black_box_function,
+        results = Results(filename=filename_pf + "dckg_ckg" + str(seed) + ".pkl")
+        loop_dckg_ckg = CoupledAndDecoupledOptimizationLoop(black_box_func=black_box_function,
                                                         objective=constrained_obj,
                                                         ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
                                                         bounds=torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device,
@@ -67,7 +67,9 @@ if __name__ == "__main__":
                                                         number_initial_designs=6,
                                                         results=results,
                                                         penalty_value=torch.tensor([penalty]))
-        loop_dckg.run()
+        loop_dckg_ckg.run()
+    
+    # Decoupled KG
     if DCKG:
         print('\n Starting dcKG:')
         model = ConstrainedDeoupledGPModelWrapper(num_constraints=num_constraints)
