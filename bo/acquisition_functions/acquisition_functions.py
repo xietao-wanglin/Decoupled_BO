@@ -253,7 +253,10 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         fantasy_model = self.model.fantasize(X=X, sampler=self.sampler,
                                              evaluation_mask=self.construct_evaluation_mask(X))
         bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
-        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasy_model, penalty_value=self.penalty_value)
+        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasised_models=fantasy_model,
+                                                                    model=self.model,
+                                                                    evaluation_mask=self.construct_evaluation_mask(X),
+                                                                    penalty_value=self.penalty_value)
         batch_shape = fantasy_model.batch_shape
         best_location_adapted_dimensions = self.adapt_x_location_dim(self.x_best_location, batch_shape)
         if (X.shape[0] in self.cached_bestx):
@@ -418,7 +421,10 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         return kg
 
     def compute_constraints_kg(self, X: Tensor, fantasy_model: Model) -> Tensor:
-        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasy_model, penalty_value=self.penalty_value)
+        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasised_models=fantasy_model,
+                                                                    model=self.model,
+                                                                    evaluation_mask=self.construct_evaluation_mask(X),
+                                                                    penalty_value=self.penalty_value)
         current_model = ConstrainedPosteriorMean(self.model, penalty_value=self.penalty_value)
         with torch.enable_grad():
             bestvals = constrained_posterior_mean_model(X)
@@ -492,7 +498,10 @@ class DecoupledConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, MCAcqu
         fantasy_model = self.model.fantasize(X=X, sampler=self.sampler,
                                              evaluation_mask=self.construct_evaluation_mask(X))
         bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
-        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasy_model, penalty_value=self.penalty_value)
+        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasised_models=fantasy_model,
+                                                                    model=self.model,
+                                                                    evaluation_mask=self.construct_evaluation_mask(X),
+                                                                    penalty_value=self.penalty_value)
         batch_shape = constrained_posterior_mean_model.model.batch_shape
         raw_points = draw_sobol_samples(bounds=bounds,
                                         n=self.number_of_raw_points,
@@ -523,7 +532,10 @@ class DecoupledConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, MCAcqu
         best_predictive_mean = self.forward(X)
         fantasy_model = self.model.fantasize(X=X, sampler=self.sampler,
                                              evaluation_mask=self.construct_evaluation_mask(X))
-        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasy_model, penalty_value=self.penalty_value)
+        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasised_models=fantasy_model,
+                                                                    model=self.model,
+                                                                    evaluation_mask=self.construct_evaluation_mask(X),
+                                                                    penalty_value=self.penalty_value)
         batch_shape = constrained_posterior_mean_model.model.batch_shape
         best_location_adapted_dimensions = self.adapt_x_location_dim(batch_shape)
         fval_best_location = constrained_posterior_mean_model(best_location_adapted_dimensions).max(dim=0)[0]
@@ -562,7 +574,9 @@ class MCConstrainedKnowledgeGradient(MCAcquisitionFunction):
                 initial_conditions = draw_sobol_samples(bounds=bounds, n=num_init_points, q=1, batch_shape=batch_shape)
                 best_x, _ = gen_candidates_torch(
                     initial_conditions=initial_conditions.contiguous(),
-                    acquisition_function=ConstrainedPosteriorMean(fantasy_model),
+                    acquisition_function=ConstrainedPosteriorMean(fantasised_models=fantasy_model,
+                                                                  model=self.model,
+                                                                  evaluation_mask=self.construct_evaluation_mask(X)),
                     lower_bounds=bounds[0],
                     upper_bounds=bounds[1],
                     options={"maxiter": 60}
