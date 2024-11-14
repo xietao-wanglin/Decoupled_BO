@@ -8,6 +8,9 @@ from botorch.models.gp_regression import SingleTaskGP
 from botorch.models.model import Model
 from botorch.models.transforms import Standardize
 from botorch.utils import t_batch_mode_transform
+from botorch.utils.probability.utils import (
+    log_ndtr as log_Phi,
+)
 from gpytorch import ExactMarginalLogLikelihood
 from gpytorch.constraints import GreaterThan
 from gpytorch.likelihoods import GaussianLikelihood
@@ -47,18 +50,21 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
     the constructor.
     """
 
-    def __init__(
-            self,
-            model: Model,
-            objective: Optional[MCAcquisitionObjective] = None,
-            maximize: bool = True,
-            penalty_value: Optional[Tensor] = torch.tensor([0.0], dtype=torch.float64),
-    ) -> None:
+    def __init__(self, model: Model, objective: Optional[MCAcquisitionObjective] = None, maximize: bool = True,
+                 penalty_value: Optional[Tensor] = torch.tensor([0.0], dtype=torch.float64),
+                 fantasised_models: Optional[Model] = None, evaluation_mask: Optional[Tensor] = None) -> None:
         super(AnalyticAcquisitionFunction, self).__init__(model=model)
+        self.fantasised_models = fantasised_models
         self.objective = objective
         self.posterior_transform = None
         self.maximize = maximize
         self.penalty_value = penalty_value.to(torch.float64)
+        if fantasised_models is not None and evaluation_mask is None:
+            raise print("provide evaluation mask when providing fantasised models")
+        if fantasised_models is None and evaluation_mask is not None:
+            raise print("provide fantasised models when providing evaluation mask")
+        self.fantasised_models = fantasised_models
+        self.evaluation_mask = evaluation_mask
 
     @t_batch_mode_transform(expected_q=1)
     def forward(self, X: Tensor) -> Tensor:
@@ -78,16 +84,39 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
         mean_constraints = means[..., 1:]
         sigma_constraints = sigmas[..., 1:]
         limits = torch.tensor([0] * (means.shape[-1] - 1))
-        z = (limits - mean_constraints) / sigma_constraints
-        probability_feasibility = torch.distributions.Normal(0, 1).cdf(z).prod(dim=-1)
+        probability_feasibility = self.compute_feasibility(mean_constraints, limits, sigma_constraints)
         constrained_posterior_mean = (mean_obj * probability_feasibility) - self.penalty_value * (
                 1 - probability_feasibility)
         return constrained_posterior_mean.squeeze(dim=-1)
 
+
+    def _evaluate_feasibility_by_index(self, X: Tensor, index):
+        means, sigmas = self.evaluate_posterior(X)
+        mean_constraints = means[..., index]
+        sigma_constraints = sigmas[..., index]
+        limits = torch.tensor([0])
+        z = (limits - mean_constraints) / sigma_constraints
+        return log_Phi(z).exp()
+
+    def compute_feasibility(self, mean_constraints, limits, sigma_constraints):
+        # Compute log-CDF to improve numerical stability, then sum
+        z = (limits - mean_constraints) / sigma_constraints
+        return log_Phi(z).sum(dim=-1).exp()
+
     def evaluate_posterior(self, X: Tensor) -> Tensor:
-        posterior = self.model.posterior(X=X)
-        means = posterior.mean.squeeze()  # (b) x m
-        sigmas = posterior.variance.squeeze().clamp_min(1e-12).sqrt()  # (b) x m
+        if self.evaluation_mask is not None:
+            posteriors = []
+            for out in range(self.model.num_outputs):
+                if self.evaluation_mask[..., out]:
+                    posteriors.append(self.fantasised_models.models[out].posterior(X))
+                else:
+                    posteriors.append(self.model.models[out].posterior(X))
+            means = torch.stack([posterior.mean.squeeze(dim=-1) for posterior in posteriors], dim=-1)
+            sigmas = torch.stack([posterior.variance.squeeze(dim=-1).clamp_min(1e-12).sqrt() for posterior in posteriors], dim=-1)
+        else:
+            posterior = self.model.posterior(X=X)
+            means = posterior.mean.squeeze()  # (b) x m
+            sigmas = posterior.variance.squeeze().clamp_min(1e-12).sqrt()  # (b) x m
         return means, sigmas
 
 

@@ -108,6 +108,27 @@ class zeroSampler(NormalMCSampler):
         self.to(device=posterior.device, dtype=posterior.dtype)
 
 
+class constantSampler(NormalMCSampler):
+    def __init__(self, sample_shape: torch.Size, seed: int | None = None, constant=5, **kwargs: torch.Any) -> None:
+        super().__init__(sample_shape, seed, **kwargs)
+        self.constant = constant
+
+    def _construct_base_samples(self, posterior: Posterior) -> None:
+        target_shape = self._get_collapsed_shape(posterior=posterior)
+        if self.base_samples is None or self.base_samples.shape != target_shape:
+            base_collapsed_shape = target_shape[len(self.sample_shape):]
+            output_dim = base_collapsed_shape.numel()
+            if output_dim > SobolEngine.MAXDIM:
+                raise UnsupportedError(
+                    "SobolQMCSampler only supports dimensions "
+                    f"`q * o <= {SobolEngine.MAXDIM}`. Requested: {output_dim}"
+                )
+            base_samples = torch.ones(self.sample_shape.numel()) * self.constant
+            base_samples = base_samples.view(target_shape)
+            self.register_buffer("base_samples", base_samples)
+        self.to(device=posterior.device, dtype=posterior.dtype)
+
+
 class quantileSampler(NormalMCSampler):
     def __init__(self, sample_shape: torch.Size, seed: int | None = None, **kwargs: torch.Any) -> None:
         super().__init__(sample_shape, seed, **kwargs)
