@@ -1,18 +1,17 @@
 from unittest import TestCase
 
 import matplotlib.pyplot as plt
-import torch
 import numpy as np
+import torch
 from botorch import fit_gpytorch_mll
 from botorch.models import SingleTaskGP, ModelListGP
 from botorch.models.transforms import Standardize
 from botorch.utils.testing import BotorchTestCase
 from gpytorch.mlls import SumMarginalLogLikelihood
 
-from bo.acquisition_functions.acquisition_functions import DecoupledConstrainedKnowledgeGradient
-from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedBraninNew, ConstrainedFunc3, MysteryFunction
-from bo.model.Model import ConstrainedGPModelWrapper, ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper
 from bo.constrained_functions.synthetic_problems import ConstrainedBranin
+from bo.model.Model import ConstrainedGPModelWrapper, ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper
+from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedBraninNew, ConstrainedFunc3, MysteryFunction
 
 device = torch.device("cpu")
 dtype = torch.double
@@ -60,27 +59,28 @@ class TestBranin(BotorchTestCase):
         plt.scatter(unfeas_x[:, 0], unfeas_x[:, 1], color="grey")
         plt.show()
 """
-        
+
+
 class TestMysteryFunction(BotorchTestCase):
 
     def test_shape(self):
-
         problem = MysteryFunction()
-        
+
         d = 2
         n_points = 40000
-        
+
         train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-        
+
         test_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-        
-        evalu = problem.evaluate_black_box(test_X) # Objective
+
+        evalu = problem.evaluate_black_box(test_X)  # Objective
         plt.scatter(test_X[:, 0], test_X[:, 1], c=evalu[:, 0], alpha=0.2)
-        evalu = problem.evaluate_black_box(train_X) # Constraint
+        evalu = problem.evaluate_black_box(train_X)  # Constraint
         unfeas_x = train_X[evalu[:, 1] >= 0]
         plt.scatter(unfeas_x[:, 0], unfeas_x[:, 1], color="grey")
         plt.colorbar()
         plt.show()
+
 
 class TestPosteriorConstrainedMean(BotorchTestCase):
 
@@ -111,6 +111,7 @@ class TestPosteriorConstrainedMean(BotorchTestCase):
         plt.scatter(test_X[:, 0], test_X[:, 1], c=penalised_posterior_values.detach())
         plt.show()
 
+
 class TestPosteriorConstrainedDecoupledMean(BotorchTestCase):
 
     def test_forward(self):
@@ -119,7 +120,7 @@ class TestPosteriorConstrainedDecoupledMean(BotorchTestCase):
         def black_box_evaluation(X):
             y = problem(X).reshape(-1, 1)
             c1 = problem.evaluate_slack_true(X)
-            return torch.concat([y -1000, c1], dim=1)
+            return torch.concat([y - 1000, c1], dim=1)
 
         d = 2
         n_points = 40
@@ -138,13 +139,15 @@ class TestPosteriorConstrainedDecoupledMean(BotorchTestCase):
         penalised_posterior_values = constrained_posterior(test_X[:, None, :])
 
         plt.scatter(test_X[:, 0], test_X[:, 1], c=penalised_posterior_values.detach())
-        plt.scatter(train_X[:, 0], train_X[:, 1], color= "red")
+        plt.scatter(train_X[:, 0], train_X[:, 1], color="red")
         plt.show()
+
 
 class TestConstrainedGPModelWrapper(TestCase):
     """
     TODO: outdated test
     """
+
     def test_fit(self):
         d = 1
         n_points_objective = 10
@@ -170,7 +173,7 @@ class TestConstrainedGPModelWrapper(TestCase):
         mll = SumMarginalLogLikelihood(model.likelihood, model)
         fit_gpytorch_mll(mll)
 
-        #kg = DecoupledConstrainedKnowledgeGradient(model=model, num_fantasies=5, current_value=torch.Tensor([0.0]))
+        # kg = DecoupledConstrainedKnowledgeGradient(model=model, num_fantasies=5, current_value=torch.Tensor([0.0]))
 
 
 class TestConstrainedGPDecoupledModelWrapper(TestCase):
@@ -188,21 +191,21 @@ class TestConstrainedGPDecoupledModelWrapper(TestCase):
         model = ConstrainedDeoupledGPModelWrapper(num_constraints=1)
         model.fit([train_Xf, train_Xc], [train_f_vals, train_c_vals])
         model.optimize()
-        
+
+
 class TestFunction3(BotorchTestCase):
 
     def test_shape(self):
-
         problem = ConstrainedFunc3()
-        
+
         d = 2
         n_points = 4000
-        
+
         train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-        
+
         test_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-        
-        evalu = problem.evaluate_black_box(test_X) # f c1 c2 c3
+
+        evalu = problem.evaluate_black_box(test_X)  # f c1 c2 c3
         plt.scatter(test_X[:, 0], test_X[:, 1], c=evalu[:, 0], alpha=0.2)
 
         evalu = problem.evaluate_black_box(train_X)
@@ -219,53 +222,54 @@ class TestFunction3(BotorchTestCase):
 
         plt.colorbar()
         plt.show()
-    
-class TestBraninFunctionNew(BotorchTestCase):
-
- def test_shape(self):
-     problem = ConstrainedBraninNew()
-     d = 2
-     n_points = 4000
-     train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-     test_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-     evalu = problem.evaluate_black_box(test_X)
-     plt.scatter(test_X[:,0], test_X[:,1], c=evalu[:,0], alpha=0.2)
-     evalu = problem.evaluate_black_box(train_X)
-     unfeas_x = train_X[evalu[:,1]>=0]
-     plt.scatter(unfeas_x[:,0], unfeas_x[:,1], color = "grey")
-     plt.colorbar()
-     plt.show()
 
 
 class TestBraninFunctionNew(BotorchTestCase):
 
- def test_shape(self):
-     problem = ConstrainedBraninNew()
-     d = 2
-     n_points = 4000
-     train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-     test_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
-     evalu = problem.evaluate_black_box(test_X)
-     plt.scatter(test_X[:,0], test_X[:,1], c=evalu[:,0], alpha=0.2)
-     evalu = problem.evaluate_black_box(train_X)
-     unfeas_x = train_X[evalu[:,1]>=0]
-     plt.scatter(unfeas_x[:,0], unfeas_x[:,1], color = "grey")
-     plt.colorbar()
-     plt.show()
-     bounds = [(-5.0, 10.0), (0.0, 15.0)]
-     x1 = np.linspace(bounds[0][0], bounds[0][1], 100)
-     x2 = np.linspace(bounds[1][0], bounds[1][1], 100)
-     X1, X2 = np.meshgrid(x1, x2)
-     X = torch.tensor(np.hstack((X1.reshape(100*100,1),X2.reshape(100*100,1))))
-     Y = problem.forward(X)
+    def test_shape(self):
+        problem = ConstrainedBraninNew()
+        d = 2
+        n_points = 4000
+        train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
+        test_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
+        evalu = problem.evaluate_black_box(test_X)
+        plt.scatter(test_X[:, 0], test_X[:, 1], c=evalu[:, 0], alpha=0.2)
+        evalu = problem.evaluate_black_box(train_X)
+        unfeas_x = train_X[evalu[:, 1] >= 0]
+        plt.scatter(unfeas_x[:, 0], unfeas_x[:, 1], color="grey")
+        plt.colorbar()
+        plt.show()
 
-     plt.figure()    
-     plt.contourf(X1, X2, Y.reshape((100,100)),100)
-     if (len(self.min)>1):    
-         plt.plot(np.array(self.min)[:,0], np.array(self.min)[:,1], 'w.', markersize=20, label=u'Observations')
-     else:
-        plt.plot(self.min[0][0], self.min[0][1], 'w.', markersize=20, label=u'Observations')
-     plt.colorbar()
-     plt.xlabel('X1')
-     plt.ylabel('X2')
-     plt.show()
+
+class TestBraninFunctionNew(BotorchTestCase):
+
+    def test_shape(self):
+        problem = ConstrainedBraninNew()
+        d = 2
+        n_points = 4000
+        train_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
+        test_X = torch.rand(n_points, d, device=self.device, dtype=dtype)
+        evalu = problem.evaluate_black_box(test_X)
+        plt.scatter(test_X[:, 0], test_X[:, 1], c=evalu[:, 0], alpha=0.2)
+        evalu = problem.evaluate_black_box(train_X)
+        unfeas_x = train_X[evalu[:, 1] >= 0]
+        plt.scatter(unfeas_x[:, 0], unfeas_x[:, 1], color="grey")
+        plt.colorbar()
+        plt.show()
+        bounds = [(-5.0, 10.0), (0.0, 15.0)]
+        x1 = np.linspace(bounds[0][0], bounds[0][1], 100)
+        x2 = np.linspace(bounds[1][0], bounds[1][1], 100)
+        X1, X2 = np.meshgrid(x1, x2)
+        X = torch.tensor(np.hstack((X1.reshape(100 * 100, 1), X2.reshape(100 * 100, 1))))
+        Y = problem.forward(X)
+
+        plt.figure()
+        plt.contourf(X1, X2, Y.reshape((100, 100)), 100)
+        if (len(self.min) > 1):
+            plt.plot(np.array(self.min)[:, 0], np.array(self.min)[:, 1], 'w.', markersize=20, label=u'Observations')
+        else:
+            plt.plot(self.min[0][0], self.min[0][1], 'w.', markersize=20, label=u'Observations')
+        plt.colorbar()
+        plt.xlabel('X1')
+        plt.ylabel('X2')
+        plt.show()

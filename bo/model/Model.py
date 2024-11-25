@@ -232,7 +232,8 @@ class ConstrainedDeoupledGPModelWrapper():
         for c in range(1, self.num_constraints + 1):
             list_of_models.append(SingleTaskGP(train_X=X[c],
                                                train_Y=Y[c].reshape(-1, 1),
-                                               train_Yvar=self.train_var_noise.expand_as(Y[c].reshape(-1, 1))))
+                                               train_Yvar=self.train_var_noise.expand_as(Y[c].reshape(-1, 1)),
+                                               outcome_transform=Standardize(m=1)))
 
         self.model = ModelListGP(*list_of_models)
         return self.model
