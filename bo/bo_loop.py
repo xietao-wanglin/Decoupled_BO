@@ -262,6 +262,18 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                 #print("kg_val ", kgvalue)
 
             new_x_ckg, acqf_value_ckg = self.get_best_coupled_kg_value(best_observed_location, best_observed_value, iteration, model)
+
+            posterior = model.posterior(new_x)
+            mu = posterior.mean
+            std = posterior.variance.sqrt().clamp_min(1e-9)
+            z = -mu / std
+            probability_infeasibility = []
+            size = self.model_wrapper.getNumberOfOutputs()
+            for i in range(1, size):
+                probability_infeasibility = probability_infeasibility + [
+                    1 - torch.distributions.Normal(0, 1).cdf(z)[0][i].detach().item()
+                    ]
+
             best_ckG_value_per_cost = acqf_value_ckg / (torch.sum(self.costs))
             best_dckg_value_per_cost = torch.max(torch.tensor(kg_values_list[:-1]) / self.costs)
             #print("best_decoupled_value", best_dckg_value_per_cost)
