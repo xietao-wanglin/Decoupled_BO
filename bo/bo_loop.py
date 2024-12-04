@@ -263,45 +263,67 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
 
             new_x_ckg, acqf_value_ckg = self.get_best_coupled_kg_value(best_observed_location, best_observed_value, iteration, model)
 
-            posterior = model.posterior(new_x)
+            posterior = model.posterior(new_x_ckg) # Use point from coupled
             mu = posterior.mean
             std = posterior.variance.sqrt().clamp_min(1e-9)
             z = -mu / std
-            probability_infeasibility = []
             size = self.model_wrapper.getNumberOfOutputs()
+            THRESHOLD = 1e-3
+            ignore_list = []
             for i in range(1, size):
-                probability_infeasibility = probability_infeasibility + [
-                    1 - torch.distributions.Normal(0, 1).cdf(z)[0][i].detach().item()
-                    ]
+                prob_infeas = 1 - torch.distributions.Normal(0, 1).cdf(z)[0][i].detach().item()
+                if prob_infeas < THRESHOLD:
+                    ignore_list.append(i)
 
-            best_ckG_value_per_cost = acqf_value_ckg / (torch.sum(self.costs))
+            idx_to_eval = list(set(range(self.number_of_outputs)) - set(ignore_list))
+            total_cost_filtered = torch.sum(self.costs[idx_to_eval])
+            best_ckG_value_per_cost = acqf_value_ckg / total_cost_filtered
             best_dckg_value_per_cost = torch.max(torch.tensor(kg_values_list[:-1]) / self.costs)
             #print("best_decoupled_value", best_dckg_value_per_cost)
             #print("best_coupled_value", best_ckG_value_per_cost)
-            if best_ckG_value_per_cost > best_dckg_value_per_cost:
-                for task_idx in range(self.number_of_outputs):
+            kg_values_list[-1] = best_ckG_value_per_cost
+            if best_ckG_value_per_cost > best_dckg_value_per_cost: # Run coupled cKG
+                for task_idx in idx_to_eval:
                     new_output = self.evaluate_black_box_func(new_x_ckg, task_idx)
                     train_x[task_idx] = torch.cat([train_x[task_idx], new_x_ckg])
                     train_y[task_idx] = torch.cat([train_y[task_idx], new_output])
-                index = -1
-                kg_values_list[-1] = best_ckG_value_per_cost
-            else:
-                kg_values_list[-1] = -1
+                index = -total_cost_filtered # Will have to change for non-ones costs
+                
+                model = self.update_model(X=train_x, y=train_y)
+                print(
+                    f"\nBatch{iteration:>2} finished: best value (EI) = "
+                    f"({best_observed_value:>4.5f}), best location " + str(
+                        best_observed_location.numpy()) + " current sample decision x: " + str(
+                        new_x_ckg.numpy()) + f" on task ALL\n",
+                    end="",
+                )
+
+                self.save_parameters(train_x=train_x,
+                                 train_y=train_y,
+                                 model_length_scales=self.model_wrapper.get_model_length_scales(),
+                                 best_predicted_location=best_observed_location,
+                                 best_predicted_location_value=self.evaluate_location_true_quality(
+                                     best_observed_location),
+                                 acqf_recommended_location=new_x_ckg,
+                                 acqf_recommended_location_true_value=self.evaluate_location_true_quality(
+                                     new_x_ckg),
+                                 acqf_recommended_output_index=index, acqf_values=kg_values_list)
+            else: # Run dcKG
                 index = torch.argmax(torch.tensor(kg_values_list[:-1]) / self.costs)
                 new_y = self.evaluate_black_box_func(new_x_list[index], index)
                 train_x[index] = torch.cat([train_x[index], new_x_list[index]])
                 train_y[index] = torch.cat([train_y[index], new_y])
-
-            model = self.update_model(X=train_x, y=train_y)
-
-            print(
-                f"\nBatch{iteration:>2} finished: best value (EI) = "
-                f"({best_observed_value:>4.5f}), best location " + str(
-                    best_observed_location.numpy()) + " current sample decision x: " + str(
-                    new_x_list[index].numpy()) + f" on task {index}\n",
-                end="",
-            )
-            self.save_parameters(train_x=train_x,
+                
+                model = self.update_model(X=train_x, y=train_y)
+                print(
+                    f"\nBatch{iteration:>2} finished: best value (EI) = "
+                    f"({best_observed_value:>4.5f}), best location " + str(
+                        best_observed_location.numpy()) + " current sample decision x: " + str(
+                        new_x_list[index].numpy()) + f" on task {index}\n",
+                    end="",
+                )
+                
+                self.save_parameters(train_x=train_x,
                                  train_y=train_y,
                                  model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location=best_observed_location,
@@ -311,6 +333,8 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(
                                      new_x_list[index]),
                                  acqf_recommended_output_index=index, acqf_values=kg_values_list)
+
+            
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
