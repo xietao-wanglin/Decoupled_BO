@@ -258,52 +258,62 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                                                           smart_initial_locations=best_observed_location)
                 kg_values_list[task_idx] = kgvalue
                 new_x_list.append(new_x)
-                #print("task_idx ", task_idx)
-                #print("kg_val ", kgvalue)
-
             new_x_ckg, acqf_value_ckg = self.get_best_coupled_kg_value(best_observed_location, best_observed_value, iteration, model)
-            best_ckG_value_per_cost = acqf_value_ckg / (torch.sum(self.costs))
+            idx_to_eval = self.compute_important_idxs(model, new_x_ckg)
+            total_cost_filtered = torch.sum(self.costs[idx_to_eval])
+            best_ckG_value_per_cost = acqf_value_ckg / total_cost_filtered
             best_dckg_value_per_cost = torch.max(torch.tensor(kg_values_list[:-1]) / self.costs)
-            #print("best_decoupled_value", best_dckg_value_per_cost)
-            #print("best_coupled_value", best_ckG_value_per_cost)
-            if best_ckG_value_per_cost > best_dckg_value_per_cost:
-                for task_idx in range(self.number_of_outputs):
+            kg_values_list[-1] = best_ckG_value_per_cost
+            if best_ckG_value_per_cost > best_dckg_value_per_cost: # Run coupled cKG
+                for task_idx in idx_to_eval:
                     new_output = self.evaluate_black_box_func(new_x_ckg, task_idx)
                     train_x[task_idx] = torch.cat([train_x[task_idx], new_x_ckg])
                     train_y[task_idx] = torch.cat([train_y[task_idx], new_output])
-                index = -1
-                kg_values_list[-1] = best_ckG_value_per_cost
-            else:
-                kg_values_list[-1] = -1
+                index = idx_to_eval # Will have to change for non-ones costs
+                location_to_sample = new_x_ckg
+            else: # Run dcKG
                 index = torch.argmax(torch.tensor(kg_values_list[:-1]) / self.costs)
                 new_y = self.evaluate_black_box_func(new_x_list[index], index)
                 train_x[index] = torch.cat([train_x[index], new_x_list[index]])
                 train_y[index] = torch.cat([train_y[index], new_y])
-
+                location_to_sample = new_x_list[index]
+                index = [index.item()]
             model = self.update_model(X=train_x, y=train_y)
-
             print(
                 f"\nBatch{iteration:>2} finished: best value (EI) = "
                 f"({best_observed_value:>4.5f}), best location " + str(
                     best_observed_location.numpy()) + " current sample decision x: " + str(
-                    new_x_list[index].numpy()) + f" on task {index}\n",
-                end="",
-            )
+                    location_to_sample.numpy()) + f" on tasks "+str(index) +"\n",
+                end="",)
+
             self.save_parameters(train_x=train_x,
                                  train_y=train_y,
                                  model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location=best_observed_location,
                                  best_predicted_location_value=self.evaluate_location_true_quality(
                                      best_observed_location),
-                                 acqf_recommended_location=new_x_list[index],
+                                 acqf_recommended_location=location_to_sample,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(
-                                     new_x_list[index]),
+                                     location_to_sample),
                                  acqf_recommended_output_index=index, acqf_values=kg_values_list)
+
+            
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
         end = time.time() - start_time
         print(f'Total time: {end} seconds')
+
+    def compute_important_idxs(self, model, new_x_ckg):
+        INFEASIBILITY_THRESHOLD = 1e-7
+        posterior_mean_feasibility = ConstrainedPosteriorMean(model=model, penalty_value=self.penalty_value)
+        ignore_list = []
+        for i in range(1, self.number_of_outputs):
+            feasibility_value = posterior_mean_feasibility.evaluate_feasibility_by_index(new_x_ckg, i).detach().item()
+            if 1 - INFEASIBILITY_THRESHOLD <= feasibility_value:
+                ignore_list.append(i)
+        idx_to_eval = list(set(range(self.number_of_outputs)) - set(ignore_list))
+        return idx_to_eval
 
     def get_best_coupled_kg_value(self, best_observed_location, best_observed_value, iteration, model):
         acquisition_function = acquisition_function_factory(model=model,
