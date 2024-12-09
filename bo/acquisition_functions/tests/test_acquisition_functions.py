@@ -442,8 +442,8 @@ class TestDecoupledKG(BotorchTestCase):
             diff_model3 = torch.sum(
                 torch.abs(constrained_fantasised_model.squeeze() - constrained_model_mean.squeeze()))
             diff_index2 = torch.sum(
-                torch.abs(fantasised_constrained_posterior_model._evaluate_feasibility_by_index(test_X, 2) -
-                          constrained_posterior_model._evaluate_feasibility_by_index(test_X, 2)))
+                torch.abs(fantasised_constrained_posterior_model.evaluate_feasibility_by_index(test_X, 2) -
+                          constrained_posterior_model.evaluate_feasibility_by_index(test_X, 2)))
             self.assertEqual(0.0, diff_model0)
             self.assertEqual(0.0, diff_model1)
             self.assertEqual(0.0, diff_model0_var)
@@ -747,7 +747,7 @@ class TestDecoupledKG(BotorchTestCase):
                 # constrained_posterior_mean = DecoupledConstraintPosteriorMean(model=fantasy_model,
                 #                                                       penalty_value=loop.penalty_value)
                 # fantasised_mean_model_value = constrained_posterior_mean._evaluate_objective(x_locations_test.unsqueeze(1))[:, 0]
-                fantasised_mean_model_value = constrained_posterior_mean._evaluate_feasibility_by_index(x_locations_test.unsqueeze(1), 1)[:,0]
+                fantasised_mean_model_value = constrained_posterior_mean.evaluate_feasibility_by_index(x_locations_test.unsqueeze(1), 1)[:, 0]
 
 
 
@@ -841,7 +841,7 @@ class TestDecoupledKG(BotorchTestCase):
         unconstrained_posterior_mean = ConstrainedPosteriorMean(model=fantasised_models,
                                                                 penalty_value=loop.penalty_value)
         x_discretisation_posterior_mean = unconstrained_posterior_mean(discretisation)
-        posterior_mean = unconstrained_posterior_mean._evaluate_feasibility_by_index(x_locations_test.unsqueeze(1), 1)
+        posterior_mean = unconstrained_posterior_mean.evaluate_feasibility_by_index(x_locations_test.unsqueeze(1), 1)
         for i in range(7):
             posterior_mean_idx = posterior_mean.detach()[:, i]
             best_location = self.best_discretisation_value(discretisation, i, x_discretisation_posterior_mean)

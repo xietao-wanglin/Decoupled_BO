@@ -96,7 +96,7 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
         limits = torch.tensor([0] * (means.shape[-1] - 1))
         return self.compute_feasibility(mean_constraints, limits, sigma_constraints)
 
-    def _evaluate_feasibility_by_index(self, X: Tensor, index):
+    def evaluate_feasibility_by_index(self, X: Tensor, index):
         means, sigmas = self.evaluate_posterior(X)
         mean_constraints = means[..., index]
         sigma_constraints = sigmas[..., index]
