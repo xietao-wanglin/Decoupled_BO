@@ -17,7 +17,7 @@ from botorch.utils import draw_sobol_samples
 from botorch.utils.transforms import match_batch_shape, t_batch_mode_transform
 from torch import Tensor
 
-from bo.model.Model import ConstrainedPosteriorMean, DecoupledConstraintPosteriorMean
+from bo.model.Model import ConstrainedPosteriorMean
 from bo.samplers.samplers import quantileSampler
 
 
@@ -233,7 +233,6 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                         probability_of_feasibility=probability_of_feasibility_per_realisation,
                         x_new=X[sample_idx])
             kg_values[sample_idx] = torch.mean(kg_per_fantasy)
-        # print("kg_values", torch.sum(kg_values))
         return kg_values
 
     def get_concatenated_discretisation(self, X, x_discretisation):
@@ -442,8 +441,10 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         bounds = torch.tensor([[0.0] * X.shape[-1],
                                [1.0] * X.shape[-1]], dtype=torch.double)
         with torch.enable_grad():
-            unconstrained_posterior_mean = DecoupledConstraintPosteriorMean(fantasy_model,
-                                                                            penalty_value=self.penalty_value)
+            unconstrained_posterior_mean = ConstrainedPosteriorMean(fantasised_models=fantasy_model,
+                                                                    model=self.model,
+                                                                    evaluation_mask=self.construct_evaluation_mask(X),
+                                                                    penalty_value=self.penalty_value)
 
             if self.use_scipy:
                 bestx, _ = gen_candidates_scipy(initial_conditions=restart_points,

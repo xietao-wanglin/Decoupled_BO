@@ -7,6 +7,7 @@ from botorch import gen_candidates_scipy
 from botorch.acquisition import MCAcquisitionObjective
 from botorch.optim import optimize_acqf
 from botorch.test_functions.base import BaseTestProblem
+from scipy.stats import qmc
 from torch import Tensor
 
 from bo.acquisition_functions.acquisition_functions import acquisition_function_factory, AcquisitionFunctionType, \
@@ -151,8 +152,9 @@ class OptimizationLoop:
         # generate training data
         train_x_list = []
         train_y_list = []
+        sampler = qmc.LatinHypercube(d=self.dim_x, seed=self.seed)
         for i in range(self.model_wrapper.getNumberOfOutputs()):
-            train_x = torch.rand(n, self.dim_x, device=device, dtype=dtype)
+            train_x = torch.Tensor(sampler.random(n=n))
             train_x_list += [train_x]
             train_y_list += [self.evaluate_black_box_func(train_x, i)]
 
@@ -211,7 +213,6 @@ class OptimizationLoop:
             if x_smart_optimised_val >= x_optimised_val:
                 return torch.atleast_2d(x_smart_optimised), x_smart_optimised_val
         return torch.atleast_2d(x_optimised), acqf_value
-
 
 
 class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
@@ -315,7 +316,7 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                                                             iteration=iteration,
                                                             initial_condition_internal_optimizer=best_observed_location)
         new_x, kg_value = self.compute_next_sample(acquisition_function=acquisition_function,
-                                                  smart_initial_locations=best_observed_location)
+                                                   smart_initial_locations=best_observed_location)
         return new_x, kg_value
 
 
@@ -521,18 +522,19 @@ class EI_OptimizationLoop(OptimizationLoop):
                                                                 penalty_value=self.penalty_value,
                                                                 iteration=iteration,
                                                                 initial_condition_internal_optimizer=best_observed_location)
-            new_x, _ = self.compute_next_sample(acquisition_function=acquisition_function,
-                                                smart_initial_locations=best_observed_location)
+            initialization = self.get_smart_initialization(acquisition_function, model, best_observed_location)
+            new_x, kg_val = self.compute_next_sample(acquisition_function=acquisition_function,
+                                                     smart_initial_locations=initialization)
 
             for i in range(self.model_wrapper.getNumberOfOutputs()):
                 new_y = self.evaluate_black_box_func(new_x, i)
                 train_x[i] = torch.cat([train_x[i], new_x])
                 train_y[i] = torch.cat([train_y[i], new_y])
-                model = self.update_model(X=train_x, y=train_y)
+            model = self.update_model(X=train_x, y=train_y)
 
             print(
-                f"\nBatch{iteration:>2} finished: best value (EI) = "
-                f"({best_observed_value:>4.5f}), best location " + str(
+                f"\nBatch{iteration:>2} finished: best value (EI) =" + str(
+                    self.evaluate_location_true_quality(best_observed_location).numpy()) + ", best location " + str(
                     best_observed_location.numpy()) + " current sample decision x: " + str(new_x.numpy()), end="\n"
             )
 
@@ -540,15 +542,28 @@ class EI_OptimizationLoop(OptimizationLoop):
                                  model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location_value=self.evaluate_location_true_quality(
                                      best_observed_location), acqf_recommended_location=new_x,
-                                 acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x))
+                                 acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),
+                                 acqf_values=[kg_val])
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
         end = time.time() - start_time
         print(f'Total time: {end} seconds')
 
+    def get_smart_initialization(self, acquisition_function, model, best_observed_location):
+        if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
+            test_x = self.lhs_sampling(1000)
+            constrained_posterior_mean = ConstrainedPosteriorMean(model, maximize=True, penalty_value=self.penalty_value)
+            feasibility = constrained_posterior_mean._compute_feasibility(test_x)
+            feasible_x_locations = test_x[feasibility > 0.1, :]
+            objective = constrained_posterior_mean._evaluate_objective(feasible_x_locations)
+            best_x_location = feasible_x_locations[torch.argmax(objective), :]
+            return torch.vstack([best_x_location[None, :], best_observed_location])
+        else:
+            return best_observed_location
+
     def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
-                        acqf_recommended_location, acqf_recommended_location_true_value, **kwargs):
+                        acqf_recommended_location, acqf_recommended_location_true_value, acqf_values, **kwargs):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
@@ -561,9 +576,12 @@ class EI_OptimizationLoop(OptimizationLoop):
         self.results.save_best_predicted_location_true_value(best_predicted_location_value)
         self.results.save_acqf_recommended_location(acqf_recommended_location)
         self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
+        self.results.save_acqf_values(acqf_values)
         self.results.generate_pkl_file()
 
     def compute_next_sample(self, acquisition_function, smart_initial_locations=None):
+        if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
+            acquisition_function.set_scipy_as_internal_optimizer()
         candidates, kgvalue = optimize_acqf(
             acq_function=acquisition_function,
             bounds=self.bounds,
@@ -576,21 +594,36 @@ class EI_OptimizationLoop(OptimizationLoop):
         x_optimised = candidates.detach()
         x_optimised_val = kgvalue.detach()
         if smart_initial_locations is not None:
-            if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
-                acquisition_function.set_scipy_as_internal_optimizer()
-            candidates, kgvalue = optimize_acqf(
+            optimization_info = [optimize_acqf(
                 acq_function=acquisition_function,
                 bounds=self.bounds,
-                num_restarts=smart_initial_locations.shape[0],
-                batch_initial_conditions=smart_initial_locations,
+                num_restarts=1,
+                batch_initial_conditions=smart_initial_location[None, :],
                 q=1,
-                options={"maxiter": 100}
-            )
-            x_smart_optimised = candidates.detach()
-            x_smart_optimised_val = kgvalue.detach()
+                options={"maxiter": 100}) for smart_initial_location in smart_initial_locations]
+            candidates = [info[0].detach() for info in optimization_info]
+            kgvalues = [info[1].detach() for info in optimization_info]
+
+            x_smart_optimised = candidates[torch.argmax(torch.Tensor(kgvalues))]
+            x_smart_optimised_val = torch.max(torch.Tensor(kgvalues))
             if x_smart_optimised_val >= x_optimised_val:
                 return torch.atleast_2d(x_smart_optimised), x_smart_optimised_val
         return torch.atleast_2d(x_optimised), x_optimised_val
+
+    def generate_initial_data(self, n: int):
+        # generate training data
+        train_x_list = []
+        train_y_list = []
+        train_x = self.lhs_sampling(n)
+        for i in range(self.model_wrapper.getNumberOfOutputs()):
+            train_x_list += [train_x]
+            train_y_list += [self.evaluate_black_box_func(train_x, i)]
+        return train_x_list, train_y_list
+
+    def lhs_sampling(self, n):
+        sampler = qmc.LatinHypercube(d=self.dim_x, seed=self.seed)
+        train_x = torch.Tensor(sampler.random(n=n))
+        return train_x
 
 
 class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):

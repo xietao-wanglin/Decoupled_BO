@@ -1,3 +1,4 @@
+import pickle
 import time
 from typing import Optional
 
@@ -12,18 +13,22 @@ from botorch.utils.testing import BotorchTestCase, MockModel, MockPosterior
 from botorch.utils.transforms import normalize
 from gpytorch import settings
 from gpytorch.mlls import SumMarginalLogLikelihood
-
+import matplotlib.pyplot as plt
 from Launcher import constraint_callable_wrapper
 from bo.acquisition_functions.acquisition_functions import MathsysExpectedImprovement, \
-    DecopledHybridConstrainedKnowledgeGradient, filter_a_b, AcquisitionFunctionType
-from bo.bo_loop import CoupledAndDecoupledOptimizationLoop
+    DecopledHybridConstrainedKnowledgeGradient, filter_a_b, AcquisitionFunctionType, acquisition_function_factory
+from bo.bo_loop import CoupledAndDecoupledOptimizationLoop, OptimizationLoop
 from bo.constrained_functions.synthetic_problems import testing_function, testing_function_dummy_constraint, \
     ConstrainedBranin
-from bo.model.Model import ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper
+from bo.model.Model import ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper, DecoupledConstraintPosteriorMean
 from bo.result_utils.result_container import Results
 from bo.samplers.samplers import quantileSampler, constantSampler
 from bo.synthetic_test_functions.synthetic_test_functions import MOPTA08, MysteryFunctionSuperRedundant, \
-    MysteryFunctionRedundant
+    MysteryFunctionRedundant, ConstrainedBraninNew
+
+device = torch.device("cpu")
+dtype = torch.double
+torch.set_default_dtype(dtype)
 
 
 class TestMathsysExpectedImprovement(BotorchTestCase):
@@ -653,6 +658,210 @@ class TestDecoupledKG(BotorchTestCase):
 
             kgs = acqf.forward(torch.ones(n_designs, 1, d))
             self.assertEqual(n_designs, len(kgs))
+
+    def test_on_branin(self):
+        torch.manual_seed(0)
+        dtype = torch.double
+        torch.set_default_dtype(dtype)
+
+        black_box_function = ConstrainedBraninNew(noise_std=1e-6, negate=True)
+        num_constraints = 1
+        model = ConstrainedDeoupledGPModelWrapper(num_constraints=num_constraints)
+        # define a feasibility-weighted objective for optimization
+        constrained_obj = ConstrainedMCObjective(
+            objective=obj_callable,
+            constraints=[constraint_callable_wrapper(idx) for idx in range(1, num_constraints + 1)],
+        )
+        results = Results(filename="remove_me.pkl")
+        bounds = torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype)
+        loop = OptimizationLoop(black_box_func=black_box_function,
+                                objective=constrained_obj,
+                                ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
+                                bounds= bounds,
+                                performance_type="model",
+                                model=model,
+                                seed=0,
+                                budget=50,
+                                number_initial_designs=6,
+                                results=results,
+                                penalty_value=torch.tensor([2.0]))
+
+        file_path = "/home/jungredda/CRYPT/GITHUB_REPOS/xietaorepo/Mathsys_RG_2024/results/constrained_branin_test_0.pkl"
+        with open(file_path, 'rb') as file:
+            data = pickle.load(file)
+        X = [d for d in data["input_data"]]
+        Y = [black_box_function.evaluate_task(d, task) for task, d in enumerate(data["input_data"])]
+        # Y[0] = (Y[0] - 85)/170
+        updated_model = loop.update_model(X, Y)
+
+        x_locations_test = torch.rand((5000, 1, 2))
+        # plot current model values
+        constrained_posterior_mean = ConstrainedPosteriorMean(updated_model, maximize=True,
+                                                              penalty_value=loop.penalty_value)
+        mean = constrained_posterior_mean(x_locations_test)
+        x_argmax = torch.argmax(mean)
+        sn = plt.scatter(x_locations_test.squeeze()[:, 0], x_locations_test.squeeze()[:, 1], c=mean.detach())
+        plt.scatter(X[0][:, 0],
+                    X[0][:, 1], color="red")
+        plt.scatter(x_locations_test.squeeze()[x_argmax, 0], x_locations_test.squeeze()[x_argmax, 1], color="red",
+                    marker="x")
+        plt.colorbar(sn)
+        plt.show()
+        # plot fantasised samples
+        argmax_mean, _ = optimize_acqf(
+            acq_function=ConstrainedPosteriorMean(updated_model, maximize=True, penalty_value=torch.Tensor([0])),
+            bounds=bounds,
+            q=1,
+            num_restarts=20,
+            raw_samples=248,
+        )
+        x_star = torch.Tensor([[0.5522, 0.0186]])
+        for z_constraint in [-5, -3, 0, 3, 5]:
+            for z_objective in [-5, -3, 0, 3, 5]:
+                quantile_sampler1 = constantSampler(sample_shape=torch.Size([3]), constant=z_objective)
+                quantile_sampler2 = constantSampler(sample_shape=torch.Size([3]), constant=z_constraint)
+                sampler_list = ListSampler(*[quantile_sampler1, quantile_sampler2])
+                x_eval_mask = torch.ones(1, 2, dtype=torch.bool)
+                constrained_obj = ConstrainedMCObjective(
+                    objective=obj_callable,
+                    constraints=[constraint_callable_wrapper(idx) for idx in range(1, num_constraints + 1)],
+                )
+                kg = DecopledHybridConstrainedKnowledgeGradient(updated_model,
+                                                                sampler=sampler_list,
+                                                                num_fantasies=3,
+                                                                objective=constrained_obj,
+                                                                number_of_raw_points=100,
+                                                                evaluate_all_sources=True,
+                                                                source_index=0,
+                                                                number_of_restarts=17,
+                                                                X_evaluation_mask=x_eval_mask,
+                                                                seed=0,
+                                                                penalty_value=loop.penalty_value,
+                                                                x_best_location=argmax_mean)
+                kg.use_scipy = False
+                discretisation, fantasy_model = kg.compute_optimized_X_discretisation(
+                    x_star.squeeze().unsqueeze(0).unsqueeze(0))
+                reshaped_discretisation = discretisation[:, 0, 0, :].detach()
+                constrained_posterior_mean = ConstrainedPosteriorMean(model=fantasy_model,
+                                                                      penalty_value=loop.penalty_value)
+                # constrained_posterior_mean = DecoupledConstraintPosteriorMean(model=fantasy_model,
+                #                                                       penalty_value=loop.penalty_value)
+                # fantasised_mean_model_value = constrained_posterior_mean._evaluate_objective(x_locations_test.unsqueeze(1))[:, 0]
+                fantasised_mean_model_value = constrained_posterior_mean._evaluate_feasibility_by_index(x_locations_test.unsqueeze(1), 1)[:,0]
+
+
+
+                x_argmax = torch.argmax(fantasised_mean_model_value)
+                sn = plt.scatter(x_locations_test.squeeze()[:, 0],
+                                 x_locations_test.squeeze()[:, 1],
+                                 c=fantasised_mean_model_value.detach())
+                plt.scatter(X[0][:, 0], X[0][:, 1], color="red")
+                plt.scatter(reshaped_discretisation[:, 0], reshaped_discretisation[:, 1], color="magenta")
+                plt.scatter(x_locations_test.squeeze()[x_argmax, 0],
+                            x_locations_test.squeeze()[x_argmax, 1],
+                            color="black",
+                            marker="x")
+                plt.scatter(x_star.squeeze()[0],
+                            x_star.squeeze()[1],
+                            color="red",
+                            marker="s")
+                plt.colorbar(sn)
+                plt.title("Zo: " + str(z_objective) + " Zc: " + str(z_constraint))
+                plt.show()
+
+        print("ok")
+    def test_on_branin_optimization(self):
+        torch.manual_seed(0)
+        dtype = torch.double
+        torch.set_default_dtype(dtype)
+
+        black_box_function = ConstrainedBraninNew(noise_std=1e-6, negate=True)
+        num_constraints = 1
+        model = ConstrainedDeoupledGPModelWrapper(num_constraints=num_constraints)
+        # define a feasibility-weighted objective for optimization
+        constrained_obj = ConstrainedMCObjective(
+            objective=obj_callable,
+            constraints=[constraint_callable_wrapper(idx) for idx in range(1, num_constraints + 1)],
+        )
+        results = Results(filename="remove_me.pkl")
+        bounds = torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype)
+        loop = OptimizationLoop(black_box_func=black_box_function,
+                                objective=constrained_obj,
+                                ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
+                                bounds= bounds,
+                                performance_type="model",
+                                model=model,
+                                seed=0,
+                                budget=50,
+                                number_initial_designs=6,
+                                results=results,
+                                penalty_value=torch.tensor([2.0]))
+
+        file_path = "/home/jungredda/CRYPT/GITHUB_REPOS/xietaorepo/Mathsys_RG_2024/results/constrained_branin_test_2_0.pkl"
+        with open(file_path, 'rb') as file:
+            data = pickle.load(file)
+        X = [d for d in data["input_data"]]
+        Y = [black_box_function.evaluate_task(d, task) for task, d in enumerate(data["input_data"])]
+        updated_model = loop.update_model(X, Y)
+
+        x_locations_test = torch.rand((5000, 1, 2)) * (torch.Tensor([0.65, 0.35]) - torch.Tensor([0.45, 0.0])) + torch.Tensor([0.45, 0.0])
+        # plot current model values
+        constrained_posterior_mean = ConstrainedPosteriorMean(updated_model, maximize=True,
+                                                              penalty_value=loop.penalty_value)
+        mean = constrained_posterior_mean(x_locations_test)
+        x_argmax = torch.argmax(mean)
+        x_eval_mask = torch.ones(1, 2, dtype=torch.bool)
+        # plot fantasised samples
+        argmax_mean, _ = optimize_acqf(
+            acq_function=ConstrainedPosteriorMean(updated_model, maximize=True, penalty_value=torch.Tensor([2.0])),
+            bounds=bounds,
+            q=1,
+            num_restarts=20,
+            raw_samples=248,
+        )
+        sn = plt.scatter(x_locations_test.squeeze()[:, 0], x_locations_test.squeeze()[:, 1], c=mean.detach())
+        plt.scatter(X[0][:, 0],
+                    X[0][:, 1], color="red")
+        plt.scatter(x_locations_test.squeeze()[x_argmax, 0], x_locations_test.squeeze()[x_argmax, 1], color="red",
+                    marker="x")
+        plt.scatter(argmax_mean.squeeze()[0], argmax_mean.squeeze()[1], color="black")
+        plt.colorbar(sn)
+        plt.xlim(0.45, 0.65)
+        plt.ylim(0, 0.35)
+        plt.show()
+        x_star = torch.Tensor([[0.5522, 0.0186]])
+        kg = acquisition_function_factory(type=AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
+                                          model=updated_model, objective=constrained_obj, best_value=None,
+                                          idx=None, number_of_outputs=2, penalty_value=loop.penalty_value,
+                                          iteration=0, initial_condition_internal_optimizer=argmax_mean)
+        kg.use_scipy = True
+        acqf = kg.forward(x_star)
+        print("acqf: ", acqf)
+        discretisation, fantasised_models = kg.compute_optimized_X_discretisation(x_star.squeeze().unsqueeze(0).unsqueeze(0))
+        unconstrained_posterior_mean = ConstrainedPosteriorMean(model=fantasised_models,
+                                                                penalty_value=loop.penalty_value)
+        x_discretisation_posterior_mean = unconstrained_posterior_mean(discretisation)
+        posterior_mean = unconstrained_posterior_mean._evaluate_feasibility_by_index(x_locations_test.unsqueeze(1), 1)
+        for i in range(7):
+            posterior_mean_idx = posterior_mean.detach()[:, i]
+            best_location = self.best_discretisation_value(discretisation, i, x_discretisation_posterior_mean)
+            sn = plt.scatter(x_locations_test.squeeze()[:, 0],
+                        x_locations_test.squeeze()[:, 1],
+                        c=posterior_mean_idx)
+            plt.colorbar(sn)
+            best_xs = discretisation[:, i, 0, :].detach().numpy()
+            plt.scatter(best_xs[:, 0], best_xs[:, 1], color="magenta")
+            plt.scatter(best_location[:, 0], best_location[:,1], c="black")
+            plt.scatter(x_star.squeeze()[0], x_star.squeeze()[1], color="red")
+            plt.xlim(0.45, 0.65)
+            plt.ylim(0, 0.35)
+            plt.show()
+        print("ok")
+
+    def best_discretisation_value(self, discretisation, i, x_discretisation_posterior_mean):
+        argmax_idxs = torch.argmax(x_discretisation_posterior_mean, dim=0)
+        best_location = discretisation[argmax_idxs[i], i].detach().numpy()
+        return best_location
 
 
 class Mopta(BotorchTestCase):

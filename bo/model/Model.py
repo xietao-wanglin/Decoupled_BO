@@ -89,6 +89,12 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
                 1 - probability_feasibility)
         return constrained_posterior_mean.squeeze(dim=-1)
 
+    def _compute_feasibility(self, X):
+        means, sigmas = self.evaluate_posterior(X)
+        mean_constraints = means[..., 1:]
+        sigma_constraints = sigmas[..., 1:]
+        limits = torch.tensor([0] * (means.shape[-1] - 1))
+        return self.compute_feasibility(mean_constraints, limits, sigma_constraints)
 
     def _evaluate_feasibility_by_index(self, X: Tensor, index):
         means, sigmas = self.evaluate_posterior(X)
@@ -97,6 +103,10 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
         limits = torch.tensor([0])
         z = (limits - mean_constraints) / sigma_constraints
         return log_Phi(z).exp()
+
+    def _evaluate_objective(self, X: Tensor):
+        means, sigmas = self.evaluate_posterior(X)
+        return means[..., 0]
 
     def compute_feasibility(self, mean_constraints, limits, sigma_constraints):
         # Compute log-CDF to improve numerical stability, then sum
@@ -112,7 +122,8 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
                 else:
                     posteriors.append(self.model.models[out].posterior(X))
             means = torch.stack([posterior.mean.squeeze(dim=-1) for posterior in posteriors], dim=-1)
-            sigmas = torch.stack([posterior.variance.squeeze(dim=-1).clamp_min(1e-12).sqrt() for posterior in posteriors], dim=-1)
+            sigmas = torch.stack(
+                [posterior.variance.squeeze(dim=-1).clamp_min(1e-12).sqrt() for posterior in posteriors], dim=-1)
         else:
             posterior = self.model.posterior(X=X)
             means = posterior.mean.squeeze()  # (b) x m
@@ -160,12 +171,58 @@ class DecoupledConstraintPosteriorMean(AnalyticAcquisitionFunction):
         """
 
         means, sigmas = self.evaluate_posterior(X)
-        mean_obj = means[..., 0]
         mean_constraints = means[..., 1:]
-        constrained_posterior_mean = mean_obj
-        return constrained_posterior_mean.squeeze(dim=-1) - self.penalty_value * torch.sum(
-            torch.max(mean_constraints, torch.tensor([0])),
-            dim=-1).squeeze()
+        return - torch.sum(mean_constraints, dim=-1).squeeze()
+
+    def evaluate_posterior(self, X: Tensor) -> Tensor:
+        posterior = self.model.posterior(X=X)
+        means = posterior.mean.squeeze()  # (b) x m
+        sigmas = posterior.variance.squeeze().clamp_min(1e-12).sqrt()  # (b) x m
+        return means, sigmas
+
+
+class FeasiblePosteriorMean(AnalyticAcquisitionFunction):
+    r"""Constrained Posterior Mean (feasibility-weighted).
+
+    Computes the analytic Posterior Mean for a Normal posterior
+    distribution, weighted by a probability of feasibility. The objective and
+    constraints are assumed to be independent and have Gaussian posterior
+    distributions. Only supports the case `q=1`. The model should be
+    multi-outcome, with the index of the objective and constraints passed to
+    the constructor.
+    """
+
+    def __init__(
+            self,
+            model: Model,
+            objective: Optional[MCAcquisitionObjective] = None,
+            index: int = 0,
+            maximize: bool = True,
+            penalty_value: Optional[Tensor] = torch.tensor([0.0], dtype=torch.float64),
+    ) -> None:
+        super(AnalyticAcquisitionFunction, self).__init__(model=model)
+        self.objective = objective
+        self.posterior_transform = None
+        self.maximize = maximize
+        self.penalty_value = penalty_value.to(torch.float64)
+        self.index = index
+
+    @t_batch_mode_transform(expected_q=1)
+    def forward(self, X: Tensor) -> Tensor:
+        r"""Evaluate Constrained Expected Improvement on the candidate set X.
+
+        Args:
+            X: A `(b) x 1 x d`-dim Tensor of `(b)` t-batches of `d`-dim design
+                points each.
+
+        Returns:
+            A `(b)`-dim Tensor of Expected Improvement values at the given
+            design points `X`.
+        """
+
+        means, sigmas = self.evaluate_posterior(X)
+        mean_constraints = means[..., 1:]
+        return -torch.sum(mean_constraints, dim=-1).squeeze()
 
     def evaluate_posterior(self, X: Tensor) -> Tensor:
         posterior = self.model.posterior(X=X)
