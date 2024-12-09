@@ -590,8 +590,6 @@ class EI_OptimizationLoop(OptimizationLoop):
         self.results.generate_pkl_file()
 
     def compute_next_sample(self, acquisition_function, smart_initial_locations=None):
-        if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
-            acquisition_function.set_scipy_as_internal_optimizer()
         candidates, kgvalue = optimize_acqf(
             acq_function=acquisition_function,
             bounds=self.bounds,
@@ -604,6 +602,8 @@ class EI_OptimizationLoop(OptimizationLoop):
         x_optimised = candidates.detach()
         x_optimised_val = kgvalue.detach()
         if smart_initial_locations is not None:
+            if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
+                acquisition_function.set_scipy_as_internal_optimizer()
             optimization_info = [optimize_acqf(
                 acq_function=acquisition_function,
                 bounds=self.bounds,

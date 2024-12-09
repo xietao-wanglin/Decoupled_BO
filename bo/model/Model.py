@@ -171,8 +171,9 @@ class DecoupledConstraintPosteriorMean(AnalyticAcquisitionFunction):
         """
 
         means, sigmas = self.evaluate_posterior(X)
+        mean_objective =  means[..., 0]
         mean_constraints = means[..., 1:]
-        return - torch.sum(mean_constraints, dim=-1).squeeze()
+        return mean_objective -  self.penalty_value * torch.sum(torch.max(mean_constraints, torch.Tensor([0])), dim=-1).squeeze()
 
     def evaluate_posterior(self, X: Tensor) -> Tensor:
         posterior = self.model.posterior(X=X)

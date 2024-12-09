@@ -92,7 +92,7 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
         torch.manual_seed(iteration)
         return DecopledHybridConstrainedKnowledgeGradient(model, sampler=sampler_list,
                                                           num_fantasies=number_of_fantasies,
-                                                          objective=objective, number_of_raw_points=100,
+                                                          objective=objective, number_of_raw_points=500,
                                                           number_of_restarts=15, X_evaluation_mask=x_eval_mask,
                                                           seed=iteration, penalty_value=penalty_value,
                                                           x_best_location=initial_condition_internal_optimizer,
@@ -441,10 +441,9 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         bounds = torch.tensor([[0.0] * X.shape[-1],
                                [1.0] * X.shape[-1]], dtype=torch.double)
         with torch.enable_grad():
-            unconstrained_posterior_mean = ConstrainedPosteriorMean(fantasised_models=fantasy_model,
-                                                                    model=self.model,
-                                                                    evaluation_mask=self.construct_evaluation_mask(X),
-                                                                    penalty_value=self.penalty_value)
+            unconstrained_posterior_mean = ConstrainedPosteriorMean(
+                model=fantasy_model,
+                penalty_value=self.penalty_value)
 
             if self.use_scipy:
                 bestx, _ = gen_candidates_scipy(initial_conditions=restart_points,

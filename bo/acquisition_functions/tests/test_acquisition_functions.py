@@ -730,10 +730,10 @@ class TestDecoupledKG(BotorchTestCase):
                                                                 sampler=sampler_list,
                                                                 num_fantasies=3,
                                                                 objective=constrained_obj,
-                                                                number_of_raw_points=100,
+                                                                number_of_raw_points=500,
                                                                 evaluate_all_sources=True,
                                                                 source_index=0,
-                                                                number_of_restarts=17,
+                                                                number_of_restarts=5,
                                                                 X_evaluation_mask=x_eval_mask,
                                                                 seed=0,
                                                                 penalty_value=loop.penalty_value,
@@ -742,12 +742,12 @@ class TestDecoupledKG(BotorchTestCase):
                 discretisation, fantasy_model = kg.compute_optimized_X_discretisation(
                     x_star.squeeze().unsqueeze(0).unsqueeze(0))
                 reshaped_discretisation = discretisation[:, 0, 0, :].detach()
-                constrained_posterior_mean = ConstrainedPosteriorMean(model=fantasy_model,
-                                                                      penalty_value=loop.penalty_value)
-                # constrained_posterior_mean = DecoupledConstraintPosteriorMean(model=fantasy_model,
+                # constrained_posterior_mean = ConstrainedPosteriorMean(model=fantasy_model,
                 #                                                       penalty_value=loop.penalty_value)
+                constrained_posterior_mean = DecoupledConstraintPosteriorMean(model=fantasy_model,
+                                                                      penalty_value=loop.penalty_value)
                 # fantasised_mean_model_value = constrained_posterior_mean._evaluate_objective(x_locations_test.unsqueeze(1))[:, 0]
-                fantasised_mean_model_value = constrained_posterior_mean.evaluate_feasibility_by_index(x_locations_test.unsqueeze(1), 1)[:, 0]
+                fantasised_mean_model_value = constrained_posterior_mean(x_locations_test.unsqueeze(1))[:, 0]
 
 
 
