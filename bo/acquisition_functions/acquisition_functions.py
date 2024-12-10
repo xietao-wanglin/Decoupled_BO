@@ -19,6 +19,7 @@ from torch import Tensor
 
 from bo.model.Model import ConstrainedPosteriorMean
 from bo.samplers.samplers import quantileSampler
+from debug_utils.utils import record_io
 
 
 class AcquisitionFunctionType(Enum):
@@ -231,7 +232,10 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                         objective_noise_variance=objective_noise_variance.squeeze(),
                         objective_posterior_covariance=objective_posterior_covariance_per_realisation,
                         probability_of_feasibility=probability_of_feasibility_per_realisation,
-                        x_new=X[sample_idx])
+                        x_new=X[sample_idx],
+                        fantasised_model=fantasised_model,
+                        discretisation_per_realisation = concatenated_xnew_discretisation[:, f].squeeze()
+                    )
             kg_values[sample_idx] = torch.mean(kg_per_fantasy)
         return kg_values
 
@@ -282,12 +286,13 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         feasibility = torch.atleast_3d(feasibility)
         return feasibility
 
+    @record_io(enabled=False)
     def compute_discrete_kg_values_fast(self, objective_mean,
                                         objective_variance,
                                         objective_noise_variance,
                                         objective_posterior_covariance,
                                         x_new: Tensor,
-                                        probability_of_feasibility: Optional[Tensor] = None, ) -> Tensor:
+                                        probability_of_feasibility: Optional[Tensor] = None, **kwargs) -> Tensor:
         """
 
         Args:
@@ -385,7 +390,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
 
         maxa = torch.max(a)
         # exclude duplicated b (or super duper similar b)
-        threshold = 1e-12
+        threshold = 1e-16
         a_0, b_0 = filter_a_b(a, b, threshold)
         # initialize
         idz = [0]
