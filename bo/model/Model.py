@@ -130,6 +130,22 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
             sigmas = posterior.variance.squeeze().clamp_min(1e-12).sqrt()  # (b) x m
         return means, sigmas
 
+class BatchedConstrainedPosteriorMean(ConstrainedPosteriorMean):
+
+    def __init__(self, model: Model, objective: Optional[MCAcquisitionObjective] = None, maximize: bool = True,
+                 penalty_value: Optional[Tensor] = torch.tensor([0.0], dtype=torch.float64),
+                 fantasised_models: Optional[Model] = None, evaluation_mask: Optional[Tensor] = None, batch_size: Optional[int]=None) -> None:
+        super().__init__(model, objective, maximize, penalty_value, fantasised_models, evaluation_mask)
+        self.batch_size = batch_size
+
+    def forward(self, X: Tensor) -> Tensor:
+        constrained_posterior_mean_values = []
+        for start_idx in range(0, X.size(0), self.batch_size):
+            end_idx = min(start_idx + self.batch_size, X.size(0))
+            x = X[start_idx:end_idx]  # Slice the tensor
+            constrained_posterior_mean_values.append(super().forward(x))
+        return torch.concat(constrained_posterior_mean_values, dim=0)
+
 
 class DecoupledConstraintPosteriorMean(AnalyticAcquisitionFunction):
     r"""Constrained Posterior Mean (feasibility-weighted).

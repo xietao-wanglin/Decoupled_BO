@@ -4,7 +4,8 @@ from typing import Optional
 import torch
 from botorch.exceptions import UnsupportedError
 from botorch.posteriors import Posterior
-from botorch.sampling.normal import NormalMCSampler
+from botorch.sampling.normal import NormalMCSampler, SobolQMCNormalSampler
+from botorch.utils import draw_sobol_normal_samples
 from torch import Tensor
 from torch.quasirandom import SobolEngine
 
@@ -162,3 +163,86 @@ class quantileSampler(NormalMCSampler):
         normal = torch.distributions.Normal(0, 1)
         z_vals = normal.icdf(quantiles_z)
         return z_vals.to(device=device)
+
+class objectiveQuantileSampler(NormalMCSampler):
+    def __init__(self, sample_shape: torch.Size, seed: int | None = None,
+                 number_of_fantasies_for_constraints= torch.Size, **kwargs: torch.Any) -> None:
+        total = sample_shape.numel() * number_of_fantasies_for_constraints.numel()
+        super().__init__(torch.Size([total]), seed, **kwargs)
+        self.number_of_fantasies_for_constraints = number_of_fantasies_for_constraints
+        self.number_of_fantasies_for_objective = sample_shape
+
+    def _construct_base_samples(self, posterior: Posterior) -> None:
+        target_shape = self._get_collapsed_shape(posterior=posterior)
+        if self.base_samples is None or self.base_samples.shape != target_shape:
+            base_collapsed_shape = target_shape[len(self.sample_shape):]
+            output_dim = base_collapsed_shape.numel()
+            if output_dim > SobolEngine.MAXDIM:
+                raise UnsupportedError(
+                    "SobolQMCSampler only supports dimensions "
+                    f"`q * o <= {SobolEngine.MAXDIM}`. Requested: {output_dim}"
+                )
+            base_samples = self.draw_quantiles(
+                device=posterior.device,
+            )
+            base_samples = base_samples.view(target_shape)
+            self.register_buffer("base_samples", base_samples)
+        self.to(device=posterior.device, dtype=posterior.dtype)
+
+    def draw_quantiles(self, device):
+        return self.construct_z_vals(nz=self.number_of_fantasies_for_objective.numel(),
+                                     number_of_repeated_values = self.number_of_fantasies_for_constraints.numel(),
+                                     device=device)
+
+    def construct_z_vals(self, nz: int, number_of_repeated_values: int, device: Optional[torch.device] = None) -> Tensor:
+        """make nz random z """
+        quantiles_z = (torch.arange(nz) + 0.5) * (1 / nz)
+        normal = torch.distributions.Normal(0, 1)
+        z_vals = normal.icdf(quantiles_z)
+        return torch.cat([z_vals] * number_of_repeated_values).to(device=device)
+
+
+class RepeatedInterleavedSobolQMCNormalSampler(SobolQMCNormalSampler):
+    def __init__(self, sample_shape: torch.Size, seed: int | None = None,
+                 number_of_fantasies_for_objective= torch.Size, **kwargs: torch.Any) -> None:
+        total = sample_shape.numel() * number_of_fantasies_for_objective.numel()
+        super().__init__(torch.Size([total]), seed, **kwargs)
+        self.number_of_fantasies_for_objective = number_of_fantasies_for_objective
+        self.number_of_fantasies_for_constraints = sample_shape
+
+    def _construct_base_samples(self, posterior: Posterior) -> None:
+        r"""Generate quasi-random Normal base samples (if necessary).
+
+               This function will generate a new set of base samples and set the
+               `base_samples` buffer if one of the following is true:
+
+               - the MCSampler has no `base_samples` attribute.
+               - the output of `_get_collapsed_shape` does not agree with the shape of
+                   `self.base_samples`.
+
+               Args:
+                   posterior: The Posterior for which to generate base samples.
+               """
+        target_shape = self._get_collapsed_shape(posterior=posterior)
+        if self.base_samples is None or self.base_samples.shape != target_shape:
+            base_collapsed_shape = target_shape[len(self.sample_shape):]
+            output_dim = base_collapsed_shape.numel()
+            if output_dim > SobolEngine.MAXDIM:
+                raise UnsupportedError(
+                    "SobolQMCSampler only supports dimensions "
+                    f"`q * o <= {SobolEngine.MAXDIM}`. Requested: {output_dim}"
+                )
+            base_samples = draw_sobol_normal_samples(
+                d=output_dim,
+                n=self.number_of_fantasies_for_constraints.numel(),
+                device=posterior.device,
+                dtype=posterior.dtype,
+                seed=self.seed,
+            )
+
+            repeated_base_samples = torch.repeat_interleave(base_samples,
+                                                            self.number_of_fantasies_for_objective.numel(),
+                                                            0)
+            repeated_base_samples = repeated_base_samples.view(target_shape)
+            self.register_buffer("base_samples", repeated_base_samples)
+        self.to(device=posterior.device, dtype=posterior.dtype)

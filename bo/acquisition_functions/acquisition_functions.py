@@ -17,8 +17,9 @@ from botorch.utils import draw_sobol_samples
 from botorch.utils.transforms import match_batch_shape, t_batch_mode_transform
 from torch import Tensor
 
-from bo.model.Model import ConstrainedPosteriorMean
-from bo.samplers.samplers import quantileSampler
+from bo.model.Model import ConstrainedPosteriorMean, BatchedConstrainedPosteriorMean
+from bo.samplers.samplers import quantileSampler, constantSampler, objectiveQuantileSampler, \
+    RepeatedInterleavedSobolQMCNormalSampler
 from debug_utils.utils import record_io
 
 
@@ -83,18 +84,21 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
         return OneShotConstrainedKnowledgeGradient(model, num_fantasies=64, current_value=best_value,
                                                    objective=objective)
     elif type is AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT:
-        number_of_fantasies = 7
-        samplers = []
-        samplers.append(quantileSampler(sample_shape=torch.Size([number_of_fantasies])))
+        number_of_fantasies_for_objective = torch.Size([7])
+        number_of_fantasies_for_constraints = torch.Size([5])
+        total_number_of_fantasies = number_of_fantasies_for_objective.numel() * number_of_fantasies_for_constraints.numel()
+        samplers = [objectiveQuantileSampler(sample_shape=number_of_fantasies_for_objective,
+                                             number_of_fantasies_for_constraints=number_of_fantasies_for_constraints)]
         for _ in range(number_of_outputs - 1):
-            samplers.append(SobolQMCNormalSampler(sample_shape=torch.Size([number_of_fantasies])))
+            samplers.append(RepeatedInterleavedSobolQMCNormalSampler(sample_shape=number_of_fantasies_for_constraints,
+                                                                     number_of_fantasies_for_objective=number_of_fantasies_for_objective))
         sampler_list = ListSampler(*samplers)
         x_eval_mask = torch.ones(1, number_of_outputs, dtype=torch.bool)
         torch.manual_seed(iteration)
         return DecopledHybridConstrainedKnowledgeGradient(model, sampler=sampler_list,
-                                                          num_fantasies=number_of_fantasies,
-                                                          objective=objective, number_of_raw_points=500,
-                                                          number_of_restarts=15, X_evaluation_mask=x_eval_mask,
+                                                          num_fantasies=total_number_of_fantasies,
+                                                          objective=objective, number_of_raw_points=100,
+                                                          number_of_restarts=1, X_evaluation_mask=x_eval_mask,
                                                           seed=iteration, penalty_value=penalty_value,
                                                           x_best_location=initial_condition_internal_optimizer,
                                                           evaluate_all_sources=True)
@@ -147,9 +151,18 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                 print("number of outputs does not coincide with source index")
                 raise
 
-        if self.num_fantasies not in [1, 3, 5, 7, 9, 11]:
+        if self.num_fantasies % 2 == 0:
             print("make sure the number of fantasies is odd..as in 3, 5, 7, 9 ,11")
             raise
+        self.number_of_fantasies_for_objective = None
+        self.number_of_fantasies_for_constraints = None
+        if evaluate_all_sources:
+            self.number_of_fantasies_for_objective = self.sampler.samplers[0].number_of_fantasies_for_objective.numel()
+            self.number_of_fantasies_for_constraints = self.sampler.samplers[
+                1].number_of_fantasies_for_constraints.numel()
+            if self.num_fantasies != self.number_of_fantasies_for_objective * self.number_of_fantasies_for_constraints:
+                print("product of fantasies between objective and constraints does not coincide with the total")
+                raise
 
     def forward(self, X: Tensor) -> Tensor:
         if len(X.shape) == 2:
@@ -195,34 +208,59 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         return kg_values
 
     def compute_coupled_kg(self, X, fantasised_model, x_discretisation):
-        concatenated_xnew_discretisation = self.get_concatenated_discretisation(X, x_discretisation)
-        feasibility_discretisation = self.precompute_feasibility(concatenated_xnew_discretisation,
+        feasibility_discretisation = self.precompute_feasibility(x_discretisation,
                                                                  fantasised_model,
                                                                  squeeze_dim_=None)
-        objective_model = self.get_objective_model(self.model)
-        # Compute posterior mean, variance, and covariance.
-        x_adapted_1 = torch.vstack(
-            [concatenated_xnew_discretisation[:, i, ...][None, ...] for i in range(self.num_fantasies)])
-        x_adapted_2 = torch.vstack([x_adapted_1[:, :, i, ...][None, ...] for i in range(X.shape[0])])
+        if len(x_discretisation.shape) == 4:
+            x_discretisation = x_discretisation.unsqueeze(-2)
 
-        objective_posterior = objective_model.posterior(x_adapted_2.squeeze(-2),
-                                                        observation_noise=False)
-        objective_mean = objective_posterior.mean
-        objective_variance = objective_posterior.variance  # (1, )
-        objective_noise_variance = self.get_objective_noise(objective_model)  # check this
-        objective_posterior_covariance = objective_posterior.mvn.covariance_matrix
+        dummy_sampler = ListSampler(*[constantSampler(torch.Size([self.num_fantasies]), constant=0)] * self.num_outputs)
+        dummy_fantasy_model = self.model.fantasize(X=X.squeeze(0), sampler=dummy_sampler,
+                                                   evaluation_mask=self.construct_evaluation_mask(X.squeeze(0)))
+        dummy_objective_model = self.get_objective_model(dummy_fantasy_model)
+
+        current_objective_model = self.get_objective_model(self.model)
+        current_objective_posterior = dummy_objective_model.posterior(x_discretisation, observation_noise=False)
+        objective_mean = current_objective_posterior.mean
+        objective_variance = current_objective_posterior.variance  # (1, )
+        objective_noise_variance = self.get_objective_noise(dummy_objective_model)
+
+        chunked_objective_mean = torch.chunk(objective_mean, self.number_of_fantasies_for_constraints, dim=1)
+        chunked_objective_variance = torch.chunk(objective_variance, self.number_of_fantasies_for_constraints, dim=1)
+        chunked_feasible_values = torch.chunk(feasibility_discretisation, self.number_of_fantasies_for_constraints,
+                                              dim=1)
+        chunked_discretisation = torch.chunk(x_discretisation, self.number_of_fantasies_for_constraints, dim=1)
 
         number_of_samples = X.shape[0]
         kg_values = torch.zeros(number_of_samples)
         for sample_idx in range(number_of_samples):
-            kg_per_fantasy = torch.zeros(self.num_fantasies)
-            for f in range(self.num_fantasies):
-                objective_mean_per_realisation = objective_mean[sample_idx, f].squeeze()
-                objective_variance_per_realisation = objective_variance[sample_idx, f].squeeze()
-                objective_posterior_covariance_per_realisation = objective_posterior_covariance[sample_idx, f].squeeze()
-                probability_of_feasibility_per_realisation = feasibility_discretisation[:, f, sample_idx, :].squeeze()
-                assert objective_posterior_covariance_per_realisation.shape[-1] == \
-                       objective_posterior_covariance_per_realisation.shape[-2];
+            warmed_up_locations = torch.vstack([(X[sample_idx]), self.x_best_location])
+            warmed_up_locations_posterior = current_objective_model.posterior(warmed_up_locations)
+            warmed_up_locations_mean = warmed_up_locations_posterior.mean.squeeze()
+            warmed_up_locations_variance = warmed_up_locations_posterior.variance.squeeze()
+            warmed_up_feasibility = self.precompute_feasibility(warmed_up_locations,
+                                                                fantasised_model,
+                                                                squeeze_dim_=None)
+            chunked_warmed_up_feasibility = torch.chunk(warmed_up_feasibility, self.number_of_fantasies_for_constraints,
+                                                        dim=0)
+            kg_per_fantasy = torch.zeros(self.number_of_fantasies_for_constraints)
+            for f in range(self.number_of_fantasies_for_constraints):
+                discretisation_per_realisation = torch.vstack([warmed_up_locations,
+                                                               chunked_discretisation[f][:, :, sample_idx].squeeze(0).squeeze(1)])
+                objective_mean_per_realisation = torch.cat([warmed_up_locations_mean,
+                                                            chunked_objective_mean[f][:, :, sample_idx].squeeze()])
+                objective_variance_per_realisation = torch.cat([warmed_up_locations_variance,
+                                                                chunked_objective_variance[f][:, :,
+                                                                sample_idx].squeeze()])
+                if number_of_samples == 1:
+                    warmed_up_feasibility_per_realisation = chunked_warmed_up_feasibility[f][0].squeeze()
+                else:
+                    warmed_up_feasibility_per_realisation = chunked_warmed_up_feasibility[f][0, sample_idx].squeeze()
+                probability_of_feasibility_per_realisation = torch.cat([warmed_up_feasibility_per_realisation,
+                                                                        chunked_feasible_values[f][:, :,
+                                                                        sample_idx].squeeze()])
+                objective_posterior_covariance_per_realisation = current_objective_model.posterior(
+                    discretisation_per_realisation).mvn.covariance_matrix
                 if torch.sum(probability_of_feasibility_per_realisation) == 0.0:
                     kg_per_fantasy[f] = torch.sum(probability_of_feasibility_per_realisation)
                 else:
@@ -234,8 +272,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                         probability_of_feasibility=probability_of_feasibility_per_realisation,
                         x_new=X[sample_idx],
                         fantasised_model=fantasised_model,
-                        discretisation_per_realisation = concatenated_xnew_discretisation[:, f].squeeze()
-                    )
+                        discretisation_per_realisation=discretisation_per_realisation)
             kg_values[sample_idx] = torch.mean(kg_per_fantasy)
         return kg_values
 
@@ -253,28 +290,37 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
 
     def compute_random_discretisation(self, X):
         torch.manual_seed(self.seed)
-        fantasy_model = self.model.fantasize(X=X, sampler=self.sampler,
+        fantasy_model = self.model.fantasize(X=X,
+                                             sampler=self.sampler,
                                              evaluation_mask=self.construct_evaluation_mask(X))
-        bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
-        constrained_posterior_mean_model = ConstrainedPosteriorMean(fantasised_models=fantasy_model,
+
+        constrained_posterior_mean_model = BatchedConstrainedPosteriorMean(fantasised_models=fantasy_model,
                                                                     model=self.model,
                                                                     evaluation_mask=self.construct_evaluation_mask(X),
-                                                                    penalty_value=self.penalty_value)
+                                                                    penalty_value=self.penalty_value,
+                                                                    batch_size=10)
         batch_shape = fantasy_model.batch_shape
         best_location_adapted_dimensions = self.adapt_x_location_dim(self.x_best_location, batch_shape)
         if (X.shape[0] in self.cached_bestx):
             restart_points = self.cached_bestx[X.shape[0]]
             return restart_points, fantasy_model
+        bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
         raw_points = draw_sobol_samples(bounds=bounds,
                                         n=self.number_of_raw_points,
                                         q=1,
                                         batch_shape=batch_shape,
                                         seed=self.seed)
 
-        restart_points = initialize_q_batch(X=raw_points,
-                                            Y=constrained_posterior_mean_model(raw_points),
-                                            n=self.number_of_restarts, eta=2.0)
-
+        raw_points_values = constrained_posterior_mean_model(raw_points)
+        # restart_points = initialize_q_batch(X=raw_points,
+        #                                     Y=raw_points_values,
+        #                                     n=self.number_of_restarts, eta=2.0)
+        #Compute only max of restart points instead of a distribution.
+        max_val, max_idx = torch.max(raw_points_values, dim=0)
+        idcs = max_idx[None, :]
+        restart_points = raw_points.gather(
+            dim=0, index=idcs.view(*idcs.shape, 1, 1).expand(self.number_of_restarts, *raw_points.shape[1:])
+        )
         restart_points = torch.cat([restart_points, best_location_adapted_dimensions], dim=0)
         return restart_points, fantasy_model
 
@@ -286,7 +332,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         feasibility = torch.atleast_3d(feasibility)
         return feasibility
 
-    @record_io(enabled=False)
+    @record_io(enabled=lambda: False)
     def compute_discrete_kg_values_fast(self, objective_mean,
                                         objective_variance,
                                         objective_noise_variance,
@@ -301,6 +347,15 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
             optimal_discretisation: num_fantasies x d Tensor. Optimal X values for each z in zvalues.
 
         """
+        assert len(objective_mean.shape) == 1;
+        assert len(objective_variance.shape) == 1;
+        assert len(objective_noise_variance.shape) == 0;
+        assert len(objective_posterior_covariance.shape) == 2;
+        assert len(objective_mean) == self.number_of_fantasies_for_objective + 2;
+        assert len(objective_variance) == self.number_of_fantasies_for_objective + 2;
+        assert objective_posterior_covariance.shape[0] == self.number_of_fantasies_for_objective + 2;
+        assert objective_posterior_covariance.shape[1] == self.number_of_fantasies_for_objective + 2;
+
         objective_variance = objective_variance[0]  # (1, )
         objective_posterior_cov_xnew_discretisation = objective_posterior_covariance[: len(x_new), :].reshape(-1,
                                                                                                               1)  # ( 1 + num_X_disc,)
@@ -365,7 +420,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         return ModelListGP(*models.models[1:])
 
     def get_objective_noise(self, model):
-        return torch.unique(model.likelihood.noise_covar.noise)
+        return model.likelihood.noise_covar.noise.view(-1)[0]
 
     def kgcb(self, a: Tensor, b: Tensor) -> Tensor:
         r"""
@@ -451,19 +506,26 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                 penalty_value=self.penalty_value)
 
             if self.use_scipy:
-                bestx, _ = gen_candidates_scipy(initial_conditions=restart_points,
+                bestx, besty = gen_candidates_scipy(initial_conditions=restart_points,
                                                 acquisition_function=unconstrained_posterior_mean,
                                                 lower_bounds=bounds[0],
                                                 upper_bounds=bounds[1],
                                                 options={"maxiter": 100})
             else:
-                bestx, _ = gen_candidates_torch(initial_conditions=restart_points,
+                bestx, besty = gen_candidates_torch(initial_conditions=restart_points,
                                                 acquisition_function=unconstrained_posterior_mean,
                                                 lower_bounds=bounds[0],
                                                 upper_bounds=bounds[1],
                                                 options={"maxiter": 100})
         self.cached_bestx[X.shape[0]] = bestx.clone().detach()
-        return bestx, fantasy_model,
+        bestx = self.select_best_x(besty, bestx)
+        return bestx, fantasy_model
+
+    def select_best_x(self, besty, bestx):
+        max_val, max_idx = torch.max(besty, dim=0)
+        idcs = max_idx[None, :]
+        bestx = bestx.gather(dim=0, index=idcs.view(*idcs.shape, 1, 1).expand(1, *bestx.shape[1:]))
+        return bestx
 
     def adapt_x_location_dim(self, X, batch_shape):
         best_location_adapted_dimensions = torch.ones((1, *batch_shape, 1, self.x_best_location.shape[-1]),

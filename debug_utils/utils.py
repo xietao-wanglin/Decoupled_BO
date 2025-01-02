@@ -1,14 +1,14 @@
 from functools import wraps
 
 
-def record_io(enabled=True):
+def record_io(enabled):
     def decorator(func):
         func.history = []
 
         @wraps(func)
         def wrapper(*args, **kwargs):
             result = func(*args, **kwargs)
-            if enabled:
+            if callable(enabled) and enabled():
                 call_data = {
                     "kwargs": kwargs,
                     "result": result
