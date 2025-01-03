@@ -98,7 +98,7 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
         return DecopledHybridConstrainedKnowledgeGradient(model, sampler=sampler_list,
                                                           num_fantasies=total_number_of_fantasies,
                                                           objective=objective, number_of_raw_points=100,
-                                                          number_of_restarts=1, X_evaluation_mask=x_eval_mask,
+                                                          number_of_restarts=5, X_evaluation_mask=x_eval_mask,
                                                           seed=iteration, penalty_value=penalty_value,
                                                           x_best_location=initial_condition_internal_optimizer,
                                                           evaluate_all_sources=True)
