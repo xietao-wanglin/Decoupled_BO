@@ -167,7 +167,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
     def forward(self, X: Tensor) -> Tensor:
         if len(X.shape) == 2:
             X = X.unsqueeze(0)
-        x_discretisation, fantasised_model = self.compute_optimized_X_discretisation(X)
+        fantasised_model, x_discretisation = self.create_discretisation_and_model_batched(X)
         if (self.evaluate_all_sources is False) and (self.source_index != 0):
             return self.compute_constraints_kg(x_discretisation, fantasised_model)
         elif (self.evaluate_all_sources is False) and (self.source_index == 0):
@@ -175,6 +175,24 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         else:
             kg_values = self.compute_coupled_kg(X, fantasised_model, x_discretisation)
         return kg_values
+
+    def create_discretisation_and_model_batched(self, X):
+        batch_size = 20
+        if X.shape[0] > batch_size:
+            x_discretisation = []
+            for start_idx in range(0, X.size(0), batch_size):
+                end_idx = min(start_idx + batch_size, X.size(0))
+                x = X[start_idx:end_idx]
+                individual_x_discretisation, _ = self.compute_optimized_X_discretisation(x, False)
+                x_discretisation.append(individual_x_discretisation)
+            x_discretisation = torch.cat(x_discretisation, dim=2)
+            torch.manual_seed(self.seed)
+            fantasised_model = self.model.fantasize(X=X,
+                                                    sampler=self.sampler,
+                                                    evaluation_mask=self.construct_evaluation_mask(X))
+        else:
+            x_discretisation, fantasised_model = self.compute_optimized_X_discretisation(X, True)
+        return fantasised_model, x_discretisation
 
     def compute_objective_kg(self, X, x_discretisation):
         if len(x_discretisation.shape) == 4:
@@ -288,7 +306,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
     def set_scipy_as_internal_optimizer(self):
         self.use_scipy = True
 
-    def compute_random_discretisation(self, X):
+    def compute_random_discretisation(self, X, save_discretisation):
         torch.manual_seed(self.seed)
         fantasy_model = self.model.fantasize(X=X,
                                              sampler=self.sampler,
@@ -298,10 +316,10 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                                                                     model=self.model,
                                                                     evaluation_mask=self.construct_evaluation_mask(X),
                                                                     penalty_value=self.penalty_value,
-                                                                    batch_size=10)
+                                                                    batch_size=20)
         batch_shape = fantasy_model.batch_shape
         best_location_adapted_dimensions = self.adapt_x_location_dim(self.x_best_location, batch_shape)
-        if (X.shape[0] in self.cached_bestx):
+        if (X.shape[0] in self.cached_bestx and save_discretisation):
             restart_points = self.cached_bestx[X.shape[0]]
             return restart_points, fantasy_model
         bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
@@ -312,10 +330,6 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                                         seed=self.seed)
 
         raw_points_values = constrained_posterior_mean_model(raw_points)
-        # restart_points = initialize_q_batch(X=raw_points,
-        #                                     Y=raw_points_values,
-        #                                     n=self.number_of_restarts, eta=2.0)
-        #Compute only max of restart points instead of a distribution.
         max_val, max_idx = torch.max(raw_points_values, dim=0)
         idcs = max_idx[None, :]
         restart_points = raw_points.gather(
@@ -366,7 +380,8 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                 1 - probability_of_feasibility.squeeze())
         predictive_variance = full_predictive_covariance.squeeze() * probability_of_feasibility.squeeze()
         return self.kgcb(a=predictive_mean,
-                         b=predictive_variance)
+                         b=predictive_variance,
+                         current_best_value = predictive_mean[1].detach())
 
     def precompute_constraints_posterior_mean(self, X, modelList):
         model = self.get_constraints_model(modelList)
@@ -404,8 +419,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         predictive_mean = objective_mean.squeeze() * probability_of_feasibility.squeeze() - self.penalty_value * (
                 1 - probability_of_feasibility.squeeze())
         predictive_variance = full_predictive_covariance.squeeze() * probability_of_feasibility.squeeze()
-        return self.kgcb(a=predictive_mean,
-                         b=predictive_variance)
+        return self.kgcb(a=predictive_mean, b=predictive_variance, current_best_value=torch.max(predictive_mean).detach())
 
     @staticmethod
     def compute_probability_of_feasibility(mean_constraints, sigma_constraints):
@@ -422,7 +436,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
     def get_objective_noise(self, model):
         return model.likelihood.noise_covar.noise.view(-1)[0]
 
-    def kgcb(self, a: Tensor, b: Tensor) -> Tensor:
+    def kgcb(self, a: Tensor, b: Tensor, current_best_value) -> Tensor:
         r"""
         Calculates the linear epigraph, i.e. the boundary of the set of points
         in 2D lying above a collection of straight lines y=a+bx.
@@ -443,7 +457,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         assert len(a) > 0, "must provide slopes"
         assert len(a) == len(b), f"#intercepts != #slopes, {len(a)}, {len(b)}"
 
-        maxa = torch.max(a)
+        maxa = current_best_value
         # exclude duplicated b (or super duper similar b)
         threshold = 1e-16
         a_0, b_0 = filter_a_b(a, b, threshold)
@@ -494,10 +508,10 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         kgvals = bestval_sample.mean(dim=0)
         return torch.atleast_1d(kgvals)
 
-    def compute_optimized_X_discretisation(self, X):
+    def compute_optimized_X_discretisation(self, X, save_discretisation: Optional[bool] = True):
         if X.shape[0] == 1 and len(X.shape) == 3:
             X = X.squeeze(0)
-        restart_points, fantasy_model = self.compute_random_discretisation(X)
+        restart_points, fantasy_model = self.compute_random_discretisation(X, save_discretisation)
         bounds = torch.tensor([[0.0] * X.shape[-1],
                                [1.0] * X.shape[-1]], dtype=torch.double)
         with torch.enable_grad():
@@ -517,7 +531,9 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                                                 lower_bounds=bounds[0],
                                                 upper_bounds=bounds[1],
                                                 options={"maxiter": 100})
-        self.cached_bestx[X.shape[0]] = bestx.clone().detach()
+        if save_discretisation:
+            self.cached_bestx.clear()
+            self.cached_bestx[X.shape[0]] = bestx.clone().detach()
         bestx = self.select_best_x(besty, bestx)
         return bestx, fantasy_model
 

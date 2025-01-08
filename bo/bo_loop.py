@@ -594,8 +594,8 @@ class EI_OptimizationLoop(OptimizationLoop):
             acq_function=acquisition_function,
             bounds=self.bounds,
             q=1,
-            num_restarts=15,  # can make smaller if too slow, not too small though
-            raw_samples=72,  # used for intialization heuristic
+            num_restarts=5,  # can make smaller if too slow, not too small though
+            raw_samples=80,  # used for intialization heuristic
             options={"maxiter": 100},
         )
         # observe new values
@@ -604,18 +604,14 @@ class EI_OptimizationLoop(OptimizationLoop):
         if smart_initial_locations is not None:
             if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
                 acquisition_function.set_scipy_as_internal_optimizer()
-            optimization_info = [optimize_acqf(
+            x_smart_optimised, x_smart_optimised_val = optimize_acqf(
                 acq_function=acquisition_function,
                 bounds=self.bounds,
                 num_restarts=1,
-                batch_initial_conditions=smart_initial_location[None, :],
+                batch_initial_conditions=smart_initial_locations,
                 q=1,
-                options={"maxiter": 100}) for smart_initial_location in smart_initial_locations]
-            candidates = [info[0].detach() for info in optimization_info]
-            kgvalues = [info[1].detach() for info in optimization_info]
+                options={"maxiter": 100})
 
-            x_smart_optimised = candidates[torch.argmax(torch.Tensor(kgvalues))]
-            x_smart_optimised_val = torch.max(torch.Tensor(kgvalues))
             if x_smart_optimised_val >= x_optimised_val:
                 return torch.atleast_2d(x_smart_optimised), x_smart_optimised_val
         return torch.atleast_2d(x_optimised), x_optimised_val

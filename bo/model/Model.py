@@ -144,7 +144,7 @@ class BatchedConstrainedPosteriorMean(ConstrainedPosteriorMean):
             end_idx = min(start_idx + self.batch_size, X.size(0))
             x = X[start_idx:end_idx]  # Slice the tensor
             constrained_posterior_mean_values.append(super().forward(x))
-        return torch.concat(constrained_posterior_mean_values, dim=0)
+        return torch.cat(constrained_posterior_mean_values, dim=0)
 
 
 class DecoupledConstraintPosteriorMean(AnalyticAcquisitionFunction):

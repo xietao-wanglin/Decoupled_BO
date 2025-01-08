@@ -205,7 +205,7 @@ class TestDecoupledKgIntegration(BotorchTestCase):
         num_test_locations = 5
         X_test = torch.rand((num_test_locations, 1, 2))
         X_test[0, :, : ] = argmax_mean
-        discretisation, fantasy_model = acqf.compute_optimized_X_discretisation(X_test)
+        discretisation, fantasy_model = acqf.compute_optimized_X_discretisation(X_test, False)
         plot_X_locations = torch.cat([torch.cat([torch.rand((5000, 1, 2))[:, None, None, :, :]] * 5, dim=2)] * 35, dim=1)
         constrained_posterior_mean_model = ConstrainedPosteriorMean(model=fantasy_model,
                                                                     penalty_value=acqf.penalty_value)
@@ -282,7 +282,7 @@ class TestDecoupledKgIntegration(BotorchTestCase):
 
         num_test_locations = 5
         X_test = torch.rand((num_test_locations, 1, 1))
-        discretisation, fantasy_model = acqf.compute_optimized_X_discretisation(X_test)
+        discretisation, fantasy_model = acqf.compute_optimized_X_discretisation(X_test, False)
         plot_X_locations = torch.cat([torch.cat([torch.rand((5000, 1, 1))[:, None, None, :, :]] * 5, dim=2)] * 25, dim=1)
         constrained_posterior_mean_model = ConstrainedPosteriorMean(model=fantasy_model,
                                                                     penalty_value=acqf.penalty_value)
