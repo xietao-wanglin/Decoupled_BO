@@ -594,9 +594,9 @@ class EI_OptimizationLoop(OptimizationLoop):
             acq_function=acquisition_function,
             bounds=self.bounds,
             q=1,
-            num_restarts=5,  # can make smaller if too slow, not too small though
-            raw_samples=80,  # used for intialization heuristic
-            options={"maxiter": 100},
+            num_restarts=15,  # can make smaller if too slow, not too small though
+            raw_samples=72,  # used for intialization heuristic
+            options={"maxiter": 100}
         )
         # observe new values
         x_optimised = candidates.detach()
