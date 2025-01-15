@@ -323,19 +323,20 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
             restart_points = self.cached_bestx[X.shape[0]]
             return restart_points, fantasy_model
         bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
-        raw_points = draw_sobol_samples(bounds=bounds,
-                                        n=self.number_of_raw_points,
-                                        q=1,
-                                        batch_shape=batch_shape,
-                                        seed=self.seed)
+        with torch.no_grad():
+            raw_points = draw_sobol_samples(bounds=bounds,
+                                            n=self.number_of_raw_points,
+                                            q=1,
+                                            batch_shape=batch_shape,
+                                            seed=self.seed)
 
-        raw_points_values = constrained_posterior_mean_model(raw_points)
-        max_val, max_idx = torch.max(raw_points_values, dim=0)
-        idcs = max_idx[None, :]
-        restart_points = raw_points.gather(
-            dim=0, index=idcs.view(*idcs.shape, 1, 1).expand(self.number_of_restarts, *raw_points.shape[1:])
-        )
-        restart_points = torch.cat([restart_points, best_location_adapted_dimensions], dim=0)
+            raw_points_values = constrained_posterior_mean_model(raw_points)
+            max_val, max_idx = torch.max(raw_points_values, dim=0)
+            idcs = max_idx[None, :]
+            restart_points = raw_points.gather(
+                dim=0, index=idcs.view(*idcs.shape, 1, 1).expand(self.number_of_restarts, *raw_points.shape[1:])
+            )
+            restart_points = torch.cat([restart_points, best_location_adapted_dimensions], dim=0)
         return restart_points, fantasy_model
 
     def precompute_feasibility(self, X, fantasised_model, squeeze_dim_=None):
