@@ -566,8 +566,12 @@ class EI_OptimizationLoop(OptimizationLoop):
             constrained_posterior_mean = ConstrainedPosteriorMean(model, maximize=True, penalty_value=self.penalty_value)
             feasibility = constrained_posterior_mean._compute_feasibility(test_x)
             feasible_x_locations = test_x[feasibility > 0.1, :]
-            objective = constrained_posterior_mean._evaluate_objective(feasible_x_locations)
-            best_x_location = feasible_x_locations[torch.argmax(objective), :]
+            if feasible_x_locations.shape[0] == 0:
+                objective = constrained_posterior_mean._evaluate_objective(test_x)
+                best_x_location = test_x[torch.argmax(objective), :]
+            else:
+                objective = constrained_posterior_mean._evaluate_objective(feasible_x_locations)
+                best_x_location = feasible_x_locations[torch.argmax(objective), :]
             return torch.vstack([best_x_location[None, :], best_observed_location])
         else:
             return best_observed_location
