@@ -297,6 +297,44 @@ class MysteryFunctionSuperRedundant(ConstrainedBaseTestProblem):
             print("Error evaluate_task")
             raise
 
+class ConstrainedFunc3_ALT(ConstrainedBaseTestProblem):
+    _bounds = [(0.0, 1.0), (0.0, 1.0)]
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 2
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        t1 = (X_tf[..., 0] - 1) ** 2
+        t2 = (X_tf[..., 1] - 0.5) ** 2
+        return -t1 - t2
+
+    def evaluate_slack_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        c1 = ((X_tf[..., 0] - 3) ** 2 + (X_tf[..., 1] + 2) ** 2) * torch.exp(-(X_tf[..., 1]) ** 7) - 12
+        c2 = 10 * X_tf[..., 0] + X_tf[..., 1] - 7
+        c3 = (X_tf[..., 0] - 0.5) ** 2 + (X_tf[..., 1] - 0.5) ** 2 - 0.2
+        return torch.max(c1, torch.max(c2, c3))
+
+    def evaluate_black_box(self, X: Tensor) -> Tensor:
+        y = self.evaluate_true(X).reshape(-1, 1)
+        c1 = self.evaluate_slack_true(X).reshape(-1, 1)
+        print(y.shape, c1.shape)
+        return torch.concat([y, c1], dim=1)
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert task_index <= 1, "Maximum of 2 Outputs allowed (task_index <= 1)"
+        assert task_index >= 0, "No negative values for task_index allowed"
+        if task_index == 0:
+            return self.forward(X)
+        elif task_index == 1:
+            return self.evaluate_slack_true(X)
+        else:
+            print("Error evaluate_task")
+            raise
+
 class ConstrainedFunc3(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 1.0), (0.0, 1.0)]
 
