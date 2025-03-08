@@ -174,7 +174,8 @@ class OptimizationLoop:
         elif best_value_computation_type == "model":
             return self.compute_best_posterior_mean(model, bounds)
 
-    def compute_best_sampled_value(self, train_x, train_y):
+    @staticmethod
+    def compute_best_sampled_value(train_x, train_y):
         return train_x[torch.argmax(train_y)], torch.max(train_y)
 
     def compute_best_posterior_mean(self, model, bounds):
@@ -457,7 +458,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                                      best_observed_location),
                                  acqf_recommended_location=new_x,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),
-                                 failing_constraint=(k),
+                                 failing_constraint=k,
                                  func_evals=evaluated_idx,
                                  consumed_budget=consumed_budget)  # last one gives index of failing constraint
             middle_time = time.time() - start_time
@@ -675,7 +676,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
         start_time = time.time()
         budget_consumed = 0
         iteration = 0
-        while (budget_consumed < self.budget):
+        while budget_consumed < self.budget:
             iteration += 1
             best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,

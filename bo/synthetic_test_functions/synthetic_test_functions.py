@@ -1,20 +1,19 @@
 import math
+import os
+import platform
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
 import torch
 from botorch.test_functions.base import ConstrainedBaseTestProblem
 from botorch.utils.transforms import unnormalize
 from torch import Tensor
 
-import os
-import subprocess
-import sys
-import tempfile
-from pathlib import Path
-import platform
-from platform import machine
 
 class MOPTA08(ConstrainedBaseTestProblem):
-    _bounds = [(0.0, 1.0)]*124
+    _bounds = [(0.0, 1.0)] * 124
 
     def __init__(self, noise_std=0.0, negate=False):
         self.dim = 124
@@ -22,7 +21,7 @@ class MOPTA08(ConstrainedBaseTestProblem):
         self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
         sysarch = 64 if sys.maxsize > 2 ** 32 else 32
         machine = platform.machine().lower()
-        if machine == "armv7l": 
+        if machine == "armv7l":
             assert sysarch == 32, "Not supported"
             self.mopta_exectutable = "mopta08_armhf.bin"
         elif machine == "x86_64":
@@ -38,11 +37,8 @@ class MOPTA08(ConstrainedBaseTestProblem):
             Path(__file__).parent, "mopta08", self.mopta_exectutable
         )
 
-
-
     def evaluate_slack_true(self, X: Tensor) -> Tensor:
         pass
-
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
@@ -52,20 +48,19 @@ class MOPTA08(ConstrainedBaseTestProblem):
             for _x in X_tf:
                 tmp_file.write(f"{_x}\n")
         popen = subprocess.Popen(
-		    self.mopta_full_path,
-		    stdout=subprocess.PIPE,
-		    cwd=directory_name,
-	        )
+            self.mopta_full_path,
+            stdout=subprocess.PIPE,
+            cwd=directory_name,
+        )
         popen.wait()
         output = (
-		    open(os.path.join(directory_name, "output.txt"), "r")
-		    .read()
-		    .split("\n")
+            open(os.path.join(directory_name, "output.txt"), "r")
+            .read()
+            .split("\n")
         )
         output = [x.strip() for x in output]
         output = torch.tensor([float(x) for x in output if len(x) > 0])
         return output
-
 
     def evaluate_black_box(self, X: Tensor) -> Tensor:
         y = self.evaluate_true(X).reshape(-1, 1)
@@ -78,7 +73,6 @@ class MOPTA08(ConstrainedBaseTestProblem):
         return self.evaluate_true(X)[task_index]
 
 
-
 class ConstrainedBraninNew(ConstrainedBaseTestProblem):
     _bounds = [(-5.0, 10.0), (0.0, 15.0)]
 
@@ -86,6 +80,15 @@ class ConstrainedBraninNew(ConstrainedBaseTestProblem):
         self.dim = 2
         super().__init__(noise_std=noise_std, negate=negate)
         self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def get_number_of_constraints(self):
+        return 1
+
+    def get_penalty(self):
+        return 4.0
+
+    def get_name(self):
+        return "constrained_branin"
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
@@ -157,6 +160,7 @@ class MysteryFunction(ConstrainedBaseTestProblem):
             print("Error evaluate_task")
             raise
 
+
 class MysteryFunctionRedundant(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 5.0), (0.0, 5.0)]
 
@@ -165,27 +169,36 @@ class MysteryFunctionRedundant(ConstrainedBaseTestProblem):
         super().__init__(noise_std=noise_std, negate=negate)
         self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
 
+    def get_number_of_constraints(self):
+        return 1
+
+    def get_penalty(self):
+        return 40.0
+
+    def get_name(self):
+        return "mystery"
+
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
 
-        t1 = 2.0 + 0.01*((X_2 - X_1.pow(2)).pow(2))
+        t1 = 2.0 + 0.01 * ((X_2 - X_1.pow(2)).pow(2))
         t2 = (1 - X_1).pow(2)
-        t3 = 2*((2-X_2).pow(2))
-        t4 = 7*torch.sin(0.5*X_1)*torch.sin(0.7*X_1*X_2)
-        return (t1 + t2 + t3 + t4)
+        t3 = 2 * ((2 - X_2).pow(2))
+        t4 = 7 * torch.sin(0.5 * X_1) * torch.sin(0.7 * X_1 * X_2)
+        return t1 + t2 + t3 + t4
 
     def evaluate_slack_true(self, X: Tensor) -> Tensor:
         pass
-    
+
     def evaluate_slack1_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return -torch.sin(X_tf[..., 0] - X_tf[..., 1] - math.pi/8)
-    
+        return -torch.sin(X_tf[..., 0] - X_tf[..., 1] - math.pi / 8)
+
     def evaluate_slack2_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
 
     def evaluate_black_box(self, X: Tensor) -> Tensor:
         y = self.evaluate_true(X).reshape(-1, 1)
@@ -206,63 +219,77 @@ class MysteryFunctionRedundant(ConstrainedBaseTestProblem):
             print("Error evaluate_task")
             raise
 
+
 class MysteryFunctionSuperRedundant(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 5.0), (0.0, 5.0)]
 
-    def __init__(self, noise_std=0.0, negate=False):
+    def __init__(self, noise_std=0.0, negate=False, redundant_constraints=False):
+        self.redundant_constraints = redundant_constraints
         self.dim = 2
         super().__init__(noise_std=noise_std, negate=negate)
         self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def get_number_of_constraints(self):
+        if self.redundant_constraints:
+            return 9
+        else:
+            return 1
+
+    def get_penalty(self):
+        return 40.0
+
+    def get_name(self):
+        return "mystery"
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
 
-        t1 = 2.0 + 0.01*((X_2 - X_1.pow(2)).pow(2))
+        t1 = 2.0 + 0.01 * ((X_2 - X_1.pow(2)).pow(2))
         t2 = (1 - X_1).pow(2)
-        t3 = 2*((2-X_2).pow(2))
-        t4 = 7*torch.sin(0.5*X_1)*torch.sin(0.7*X_1*X_2)
-        return (t1 + t2 + t3 + t4)
+        t3 = 2 * ((2 - X_2).pow(2))
+        t4 = 7 * torch.sin(0.5 * X_1) * torch.sin(0.7 * X_1 * X_2)
+        return t1 + t2 + t3 + t4
 
     def evaluate_slack_true(self, X: Tensor) -> Tensor:
         pass
-    
+
     def evaluate_slack1_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return -torch.sin(X_tf[..., 0] - X_tf[..., 1] - math.pi/8)
-    
+        return -torch.sin(X_tf[..., 0] - X_tf[..., 1] - math.pi / 8)
+
     def evaluate_slack2_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
-    
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
+
     def evaluate_slack3_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
-    
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
+
     def evaluate_slack4_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
-    
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
+
     def evaluate_slack5_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
-    
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
+
     def evaluate_slack6_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
-    
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
+
     def evaluate_slack7_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
-    
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
+
     def evaluate_slack8_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
-    
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
+
     def evaluate_slack9_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        return X_tf[...,0]*0.0 + X_tf[...,0]*0.0 - 100
+        return X_tf[..., 0] * 0.0 + X_tf[..., 0] * 0.0 - 100
 
     def evaluate_black_box(self, X: Tensor) -> Tensor:
         y = self.evaluate_true(X).reshape(-1, 1)
@@ -296,6 +323,7 @@ class MysteryFunctionSuperRedundant(ConstrainedBaseTestProblem):
         else:
             print("Error evaluate_task")
             raise
+
 
 class ConstrainedFunc3_ALT(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 1.0), (0.0, 1.0)]
@@ -335,8 +363,18 @@ class ConstrainedFunc3_ALT(ConstrainedBaseTestProblem):
             print("Error evaluate_task")
             raise
 
+
 class ConstrainedFunc3(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 1.0), (0.0, 1.0)]
+
+    def get_number_of_constraints(self):
+        return 3
+
+    def get_penalty(self):
+        return 4.0
+
+    def get_name(self):
+        return "test_function_3"
 
     def __init__(self, noise_std=0.0, negate=False):
         self.dim = 2

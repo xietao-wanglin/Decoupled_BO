@@ -22,7 +22,18 @@ device = torch.device("cpu")
 dtype = torch.float64
 
 
-class GPModelWrapper():
+def obj_callable(Z: torch.Tensor, X: Optional[torch.Tensor] = None):
+    return Z[..., 0]
+
+
+def constraint_callable_wrapper(constraint_idx):
+    def constraint_callable(Z):
+        return Z[..., constraint_idx]
+
+    return constraint_callable
+
+
+class GPModelWrapper:
     def __init__(self):
         self.train_yvar = torch.tensor(1e-6, device=device, dtype=dtype)
 
@@ -108,7 +119,8 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
         means, sigmas = self.evaluate_posterior(X)
         return means[..., 0]
 
-    def compute_feasibility(self, mean_constraints, limits, sigma_constraints):
+    @staticmethod
+    def compute_feasibility(mean_constraints, limits, sigma_constraints):
         # Compute log-CDF to improve numerical stability, then sum
         z = (limits - mean_constraints) / sigma_constraints
         return log_Phi(z).sum(dim=-1).exp()
@@ -130,11 +142,13 @@ class ConstrainedPosteriorMean(AnalyticAcquisitionFunction):
             sigmas = posterior.variance.squeeze().clamp_min(1e-12).sqrt()  # (b) x m
         return means, sigmas
 
+
 class BatchedConstrainedPosteriorMean(ConstrainedPosteriorMean):
 
     def __init__(self, model: Model, objective: Optional[MCAcquisitionObjective] = None, maximize: bool = True,
                  penalty_value: Optional[Tensor] = torch.tensor([0.0], dtype=torch.float64),
-                 fantasised_models: Optional[Model] = None, evaluation_mask: Optional[Tensor] = None, batch_size: Optional[int]=None) -> None:
+                 fantasised_models: Optional[Model] = None, evaluation_mask: Optional[Tensor] = None,
+                 batch_size: Optional[int] = None) -> None:
         super().__init__(model, objective, maximize, penalty_value, fantasised_models, evaluation_mask)
         self.batch_size = batch_size
 
@@ -187,9 +201,10 @@ class DecoupledConstraintPosteriorMean(AnalyticAcquisitionFunction):
         """
 
         means, sigmas = self.evaluate_posterior(X)
-        mean_objective =  means[..., 0]
+        mean_objective = means[..., 0]
         mean_constraints = means[..., 1:]
-        return mean_objective -  self.penalty_value * torch.sum(torch.max(mean_constraints, torch.Tensor([0])), dim=-1).squeeze()
+        return mean_objective - self.penalty_value * torch.sum(torch.max(mean_constraints, torch.Tensor([0])),
+                                                               dim=-1).squeeze()
 
     def evaluate_posterior(self, X: Tensor) -> Tensor:
         posterior = self.model.posterior(X=X)
@@ -254,7 +269,7 @@ class CustomGaussianLikelihood(GaussianLikelihood):
         self.register_constraint("noise_constraint", GreaterThan(1e-4))
 
 
-class ConstrainedGPModelWrapper():
+class ConstrainedGPModelWrapper:
     def __init__(self, num_constraints):
         self.model_f = None
         self.model = None
@@ -285,7 +300,7 @@ class ConstrainedGPModelWrapper():
         return self.model
 
 
-class ConstrainedDeoupledGPModelWrapper():
+class ConstrainedDeoupledGPModelWrapper:
     def __init__(self, num_constraints):
         self.model_f = None
         self.model = None

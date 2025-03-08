@@ -63,9 +63,10 @@ class testing_function(ConstrainedBaseTestProblem):
         X_tf = unnormalize(X, self._bounds)
         return self.expensive_function(X_tf)
 
-    def expensive_function(self, x):
+    @staticmethod
+    def expensive_function(x):
         x = x - 0.55
-        return torch.sin(x) + torch.sin((2.0) * x)
+        return torch.sin(x) + torch.sin(2.0 * x)
 
 
 class testing_function_dummy_constraint(ConstrainedBaseTestProblem):
@@ -82,13 +83,15 @@ class testing_function_dummy_constraint(ConstrainedBaseTestProblem):
         X_tf = unnormalize(X, self.bounds)
         return torch.sin(X_tf - 1)
 
-    def evaluate_slack_true2(self, X: Tensor) -> Tensor:
+    @staticmethod
+    def evaluate_slack_true2(X: Tensor) -> Tensor:
         return torch.ones(X.shape, dtype=torch.float64) * -100
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self.bounds)
         return self.expensive_function(X_tf)
 
-    def expensive_function(self, x):
+    @staticmethod
+    def expensive_function(x):
         x = x - 0.55
-        return torch.sin(x) + torch.sin((2.0) * x)
+        return torch.sin(x) + torch.sin(2.0 * x)

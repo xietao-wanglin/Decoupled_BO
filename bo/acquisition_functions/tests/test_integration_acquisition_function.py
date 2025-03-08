@@ -10,15 +10,13 @@ from gpytorch import settings
 from matplotlib import pyplot as plt
 from numpy.ma.testutils import assert_close, assert_equal
 
-from Launcher import constraint_callable_wrapper
 from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType, \
     DecopledHybridConstrainedKnowledgeGradient, acquisition_function_factory
-from bo.bo_loop import OptimizationLoop
-from bo.model.Model import ConstrainedDeoupledGPModelWrapper, ConstrainedPosteriorMean
+from bo.bo_loops.bo_loop import OptimizationLoop
+from bo.model.Model import ConstrainedDeoupledGPModelWrapper, ConstrainedPosteriorMean, constraint_callable_wrapper
 from bo.result_utils.result_container import Results
 from bo.samplers.samplers import objectiveQuantileSampler, RepeatedInterleavedSobolQMCNormalSampler
 from bo.synthetic_test_functions.synthetic_test_functions import MysteryFunctionSuperRedundant
-from debug_utils import config
 
 device = torch.device("cpu")
 dtype = torch.double
@@ -89,7 +87,7 @@ class TestDecoupledKgIntegration(BotorchTestCase):
                                                          objective=self.constrained_obj,
                                                          number_of_raw_points=500,
                                                          number_of_restarts=1,
-                                                         X_evaluation_mask=x_eval_mask,
+                                                         x_evaluation_mask=x_eval_mask,
                                                          seed=0, penalty_value=self.loop.penalty_value,
                                                          x_best_location=argmax_mean,
                                                          evaluate_all_sources=True)
@@ -100,7 +98,6 @@ class TestDecoupledKgIntegration(BotorchTestCase):
         print("ok")
 
     def test_sampled_locations_have_cKG_value_zero_coupled(self):
-        config.TESTING_MODE = False
         argmax_mean, _ = optimize_acqf(
             acq_function=self.constrained_posterior_model,
             bounds=self.bounds,
@@ -124,7 +121,7 @@ class TestDecoupledKgIntegration(BotorchTestCase):
                                                         objective=self.constrained_obj,
                                                         number_of_raw_points=500,
                                                         number_of_restarts=1,
-                                                        X_evaluation_mask=x_eval_mask,
+                                                        x_evaluation_mask=x_eval_mask,
                                                         seed=0, penalty_value=self.loop.penalty_value,
                                                         x_best_location=argmax_mean,
                                                         evaluate_all_sources=True)
@@ -179,7 +176,7 @@ class TestDecoupledKgIntegration(BotorchTestCase):
                                                          objective=self.constrained_obj,
                                                          number_of_raw_points=500,
                                                          number_of_restarts=1,
-                                                         X_evaluation_mask=x_eval_mask,
+                                                         x_evaluation_mask=x_eval_mask,
                                                          seed=0, penalty_value=self.loop.penalty_value,
                                                          x_best_location=argmax_mean,
                                                          evaluate_all_sources=True)

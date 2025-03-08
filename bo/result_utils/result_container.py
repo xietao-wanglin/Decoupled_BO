@@ -2,7 +2,7 @@ import os
 import pickle
 
 
-class Results():
+class Results:
     def __init__(self, filename):
         self.filename = filename
         self.input_data = None

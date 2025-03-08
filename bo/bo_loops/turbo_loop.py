@@ -3,10 +3,9 @@ from botorch.test_functions.base import BaseTestProblem
 import torch
 import time
 from torch import Tensor
-from torch import tensor
 from bo.acquisition_functions.Turbo import ScboState, create_trust_region
 from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType, acquisition_function_factory
-from bo.bo_loop import OptimizationLoop
+from bo.bo_loops.bo_loop import OptimizationLoop
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper
 from bo.result_utils.result_container import Results
 from bo.acquisition_functions.Turbo import update_state

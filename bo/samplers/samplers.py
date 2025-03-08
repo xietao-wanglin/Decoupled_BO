@@ -39,7 +39,8 @@ class cKGSampler(NormalMCSampler):
         combinations = list(product(*[base_samples_single_dimension for _ in range(d)]))
         return torch.tensor(combinations, dtype=dtype, device=device)
 
-    def construct_z_vals(self, nz: int, device: Optional[torch.device] = None) -> Tensor:
+    @staticmethod
+    def construct_z_vals(nz: int, device: Optional[torch.device] = None) -> Tensor:
         """make nz random z """
         quantiles_z = (torch.arange(nz) + 0.5) * (1 / nz)
         normal = torch.distributions.Normal(0, 1)
@@ -77,7 +78,8 @@ class quantileSamplerCoupledSources(NormalMCSampler):
     def draw_quantiles(self, d, n, device, dtype):
         return self.construct_z_vals_coupled_sources(nz=n, device=device)
 
-    def construct_z_vals_coupled_sources(self, nz: int, device: Optional[torch.device] = None) -> Tensor:
+    @staticmethod
+    def construct_z_vals_coupled_sources(nz: int, device: Optional[torch.device] = None) -> Tensor:
         """make nz random z """
         quantiles_z = (torch.arange(nz) + 0.5) * (1 / nz)
         normal = torch.distributions.Normal(0, 1)
@@ -157,7 +159,8 @@ class quantileSampler(NormalMCSampler):
     def draw_quantiles(self, d, n, device, dtype):
         return self.construct_z_vals(nz=n, device=device)
 
-    def construct_z_vals(self, nz: int, device: Optional[torch.device] = None) -> Tensor:
+    @staticmethod
+    def construct_z_vals(nz: int, device: Optional[torch.device] = None) -> Tensor:
         """make nz random z """
         quantiles_z = (torch.arange(nz) + 0.5) * (1 / nz)
         normal = torch.distributions.Normal(0, 1)
@@ -194,7 +197,8 @@ class objectiveQuantileSampler(NormalMCSampler):
                                      number_of_repeated_values = self.number_of_fantasies_for_constraints.numel(),
                                      device=device)
 
-    def construct_z_vals(self, nz: int, number_of_repeated_values: int, device: Optional[torch.device] = None) -> Tensor:
+    @staticmethod
+    def construct_z_vals(nz: int, number_of_repeated_values: int, device: Optional[torch.device] = None) -> Tensor:
         """make nz random z """
         quantiles_z = (torch.arange(nz) + 0.5) * (1 / nz)
         normal = torch.distributions.Normal(0, 1)

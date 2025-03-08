@@ -12,12 +12,11 @@ from botorch.utils.testing import BotorchTestCase
 from gpytorch.mlls import SumMarginalLogLikelihood
 from torch.testing import assert_allclose
 
-from Launcher import obj_callable, constraint_callable_wrapper
 from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType, acquisition_function_factory
-from bo.bo_loop import OptimizationLoop
+from bo.bo_loops.bo_loop import OptimizationLoop
 from bo.constrained_functions.synthetic_problems import ConstrainedBranin
 from bo.model.Model import ConstrainedGPModelWrapper, ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper, \
-    BatchedConstrainedPosteriorMean
+    BatchedConstrainedPosteriorMean, obj_callable, constraint_callable_wrapper
 from bo.result_utils.result_container import Results
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedBraninNew, ConstrainedFunc3, MysteryFunction
 
@@ -252,7 +251,8 @@ class TestPosteriorConstrainedDecoupledMean(BotorchTestCase):
         model.fit([train_X, train_X], [eval[:, 0], eval[:, 1]])
         optimized_model = model.optimize()
 
-        constrained_posterior = ConstrainedPosteriorMean(model=optimized_model, maximize=True, penalty_value=00)
+        constrained_posterior = ConstrainedPosteriorMean(model=optimized_model, maximize=True,
+                                                         penalty_value=torch.tensor([0]))
         penalised_posterior_values = constrained_posterior(test_X[:, None, :])
 
         plt.scatter(test_X[:, 0], test_X[:, 1], c=penalised_posterior_values.detach())
@@ -382,7 +382,7 @@ class TestBraninFunctionNew(BotorchTestCase):
 
         plt.figure()
         plt.contourf(X1, X2, Y.reshape((100, 100)), 100)
-        if (len(self.min) > 1):
+        if len(self.min) > 1:
             plt.plot(np.array(self.min)[:, 0], np.array(self.min)[:, 1], 'w.', markersize=20, label=u'Observations')
         else:
             plt.plot(self.min[0][0], self.min[0][1], 'w.', markersize=20, label=u'Observations')

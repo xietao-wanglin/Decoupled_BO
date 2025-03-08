@@ -1,4 +1,3 @@
-import pickle
 import time
 from typing import Optional
 
@@ -13,18 +12,16 @@ from botorch.utils.testing import BotorchTestCase, MockModel, MockPosterior
 from botorch.utils.transforms import normalize
 from gpytorch import settings
 from gpytorch.mlls import SumMarginalLogLikelihood
-import matplotlib.pyplot as plt
-from Launcher import constraint_callable_wrapper
 from bo.acquisition_functions.acquisition_functions import MathsysExpectedImprovement, \
     DecopledHybridConstrainedKnowledgeGradient, filter_a_b, AcquisitionFunctionType, acquisition_function_factory
-from bo.bo_loop import CoupledAndDecoupledOptimizationLoop, OptimizationLoop
+from bo.bo_loops.bo_loop import CoupledAndDecoupledOptimizationLoop
 from bo.constrained_functions.synthetic_problems import testing_function, testing_function_dummy_constraint, \
     ConstrainedBranin
-from bo.model.Model import ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper, DecoupledConstraintPosteriorMean
+from bo.model.Model import ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper, constraint_callable_wrapper
 from bo.result_utils.result_container import Results
 from bo.samplers.samplers import quantileSampler, constantSampler
 from bo.synthetic_test_functions.synthetic_test_functions import MOPTA08, MysteryFunctionSuperRedundant, \
-    MysteryFunctionRedundant, ConstrainedBraninNew
+    MysteryFunctionRedundant
 
 device = torch.device("cpu")
 dtype = torch.double
@@ -148,7 +145,7 @@ class TestDecoupledKG(BotorchTestCase):
                                                                   num_fantasies=n_fantasised_samples,
                                                                   source_index=index,
                                                                   objective=objective, number_of_raw_points=100,
-                                                                  number_of_restarts=15, X_evaluation_mask=x_eval_mask,
+                                                                  number_of_restarts=15, x_evaluation_mask=x_eval_mask,
                                                                   seed=seed, penalty_value=penalty_value,
                                                                   x_best_location=argmax_mean,
                                                                   evaluate_all_sources=False)
@@ -206,7 +203,7 @@ class TestDecoupledKG(BotorchTestCase):
                                                                   num_fantasies=n_fantasised_samples,
                                                                   source_index=index,
                                                                   objective=objective, number_of_raw_points=100,
-                                                                  number_of_restarts=15, X_evaluation_mask=x_eval_mask,
+                                                                  number_of_restarts=15, x_evaluation_mask=x_eval_mask,
                                                                   seed=seed, penalty_value=penalty_value,
                                                                   x_best_location=argmax_mean,
                                                                   evaluate_all_sources=False)
@@ -272,7 +269,7 @@ class TestDecoupledKG(BotorchTestCase):
                                                                   num_fantasies=n_fantasised_samples,
                                                                   source_index=index,
                                                                   objective=objective, number_of_raw_points=200,
-                                                                  number_of_restarts=20, X_evaluation_mask=x_eval_mask,
+                                                                  number_of_restarts=20, x_evaluation_mask=x_eval_mask,
                                                                   seed=seed, penalty_value=penalty_value,
                                                                   x_best_location=argmax_mean,
                                                                   evaluate_all_sources=False)
@@ -332,7 +329,7 @@ class TestDecoupledKG(BotorchTestCase):
                                                               num_fantasies=n_fantasised_samples,
                                                               source_index=index,
                                                               objective=objective, number_of_raw_points=200,
-                                                              number_of_restarts=20, X_evaluation_mask=x_eval_mask,
+                                                              number_of_restarts=20, x_evaluation_mask=x_eval_mask,
                                                               seed=seed, penalty_value=penalty_value,
                                                               x_best_location=argmax_mean,
                                                               evaluate_all_sources=False)
@@ -493,7 +490,7 @@ class TestDecoupledKG(BotorchTestCase):
                                                                   num_fantasies=n_fantasised_samples,
                                                                   source_index=index,
                                                                   objective=objective, number_of_raw_points=100,
-                                                                  number_of_restarts=21, X_evaluation_mask=x_eval_mask,
+                                                                  number_of_restarts=21, x_evaluation_mask=x_eval_mask,
                                                                   seed=0, penalty_value=penalty_value,
                                                                   x_best_location=argmax_mean,
                                                                   evaluate_all_sources=False)
@@ -552,7 +549,7 @@ class TestDecoupledKG(BotorchTestCase):
                                                                   num_fantasies=n_fantasised_samples,
                                                                   source_index=index,
                                                                   objective=objective, number_of_raw_points=100,
-                                                                  number_of_restarts=21, X_evaluation_mask=x_eval_mask,
+                                                                  number_of_restarts=21, x_evaluation_mask=x_eval_mask,
                                                                   seed=0, penalty_value=penalty_value,
                                                                   x_best_location=argmax_mean,
                                                                   evaluate_all_sources=False)

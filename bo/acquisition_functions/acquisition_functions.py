@@ -98,7 +98,7 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
         return DecopledHybridConstrainedKnowledgeGradient(model, sampler=sampler_list,
                                                           num_fantasies=total_number_of_fantasies,
                                                           objective=objective, number_of_raw_points=100,
-                                                          number_of_restarts=5, X_evaluation_mask=x_eval_mask,
+                                                          number_of_restarts=5, x_evaluation_mask=x_eval_mask,
                                                           seed=iteration, penalty_value=penalty_value,
                                                           x_best_location=initial_condition_internal_optimizer,
                                                           evaluate_all_sources=True)
@@ -116,7 +116,7 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
                                                           objective=objective, number_of_raw_points=100,
                                                           evaluate_all_sources=False,
                                                           source_index=idx,
-                                                          number_of_restarts=15, X_evaluation_mask=x_eval_mask,
+                                                          number_of_restarts=15, x_evaluation_mask=x_eval_mask,
                                                           seed=iteration, penalty_value=penalty_value,
                                                           x_best_location=initial_condition_internal_optimizer)
 
@@ -125,15 +125,15 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
 
     def __init__(self, model: Model, sampler: Optional[MCSampler] = None, num_fantasies: Optional[int] = 5,
                  current_value: Optional[Tensor] = None, objective: Optional[MCAcquisitionObjective] = None,
-                 posterior_transform: Optional[PosteriorTransform] = None, X_pending: Optional[Tensor] = None,
+                 posterior_transform: Optional[PosteriorTransform] = None, x_pending: Optional[Tensor] = None,
                  number_of_raw_points: Optional[int] = 64, number_of_restarts: Optional[int] = 20,
-                 X_evaluation_mask: Optional[Tensor] = None, seed: Optional[int] = 0,
+                 x_evaluation_mask: Optional[Tensor] = None, seed: Optional[int] = 0,
                  penalty_value: Optional[Tensor] = None, x_best_location: Optional[Tensor] = None,
                  evaluate_all_sources=None, source_index: Optional[int] = None) -> None:
 
         super().__init__(model=model, sampler=sampler, objective=objective,
-                         posterior_transform=posterior_transform, X_pending=X_pending,
-                         X_evaluation_mask=X_evaluation_mask)
+                         posterior_transform=posterior_transform, X_pending=x_pending,
+                         X_evaluation_mask=x_evaluation_mask)
         self.current_value = current_value
         self.num_fantasies = num_fantasies
         self.penalty_value = penalty_value
@@ -319,7 +319,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                                                                     batch_size=20)
         batch_shape = fantasy_model.batch_shape
         best_location_adapted_dimensions = self.adapt_x_location_dim(self.x_best_location, batch_shape)
-        if (X.shape[0] in self.cached_bestx and save_discretisation):
+        if X.shape[0] in self.cached_bestx and save_discretisation:
             restart_points = self.cached_bestx[X.shape[0]]
             return restart_points, fantasy_model
         bounds = torch.tensor([[0.0] * X.shape[-1], [1.0] * X.shape[-1]], dtype=torch.double)
@@ -428,16 +428,20 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         probability_feasibility = torch.distributions.Normal(0, 1).cdf(z).prod(dim=-1)
         return probability_feasibility
 
-    def get_objective_model(self, models: ModelListGP):
+    @staticmethod
+    def get_objective_model(models: ModelListGP):
         return models.models[0]
 
-    def get_constraints_model(self, models: ModelListGP):
+    @staticmethod
+    def get_constraints_model(models: ModelListGP):
         return ModelListGP(*models.models[1:])
 
-    def get_objective_noise(self, model):
+    @staticmethod
+    def get_objective_noise(model):
         return model.likelihood.noise_covar.noise.view(-1)[0]
 
-    def kgcb(self, a: Tensor, b: Tensor, current_best_value) -> Tensor:
+    @staticmethod
+    def kgcb(a: Tensor, b: Tensor, current_best_value) -> Tensor:
         r"""
         Calculates the linear epigraph, i.e. the boundary of the set of points
         in 2D lying above a collection of straight lines y=a+bx.
