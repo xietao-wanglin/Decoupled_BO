@@ -11,6 +11,7 @@ class Results():
         self.performance_type = None
         self.number_initial_samples = None
         self.budget = None
+        self.budget_consumed = []
         self.model_length_scales = []
         self.acqf_values = []
         self.best_predicted_location = []
@@ -20,6 +21,9 @@ class Results():
         self.acqf_recommended_output_index = []
         self.failing_constraint = []
         self.evals = []
+
+    def save_budget_consumed(self, budget_consumed):
+        self.budget_consumed.append(budget_consumed.item())
 
     def save_failing_constraint(self, k):
         if k == -1:
@@ -100,6 +104,7 @@ class Results():
                 "acqf_recommended_location": self.acqf_recommended_location,
                 "acqf_recommended_location_value": self.acqf_recommended_location_value,
                 "acqf_recommended_output_index:": self.acqf_recommended_output_index,
-                "acqf_values":self.acqf_values,
+                "acqf_values": self.acqf_values,
                 "failing_index:": self.failing_constraint,
-                "evaluated_functions": self.evals}
+                "evaluated_functions": self.evals,
+                "budget_consumed": self.budget_consumed}

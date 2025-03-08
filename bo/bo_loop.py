@@ -56,7 +56,9 @@ class OptimizationLoop:
         model = self.update_model(train_x, train_y)
 
         start_time = time.time()
-        for iteration in range(self.budget):
+        iteration = 0
+        budget_consumed = 0
+        while budget_consumed < self.budget:
             best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,
                 train_x=train_x,
@@ -89,7 +91,7 @@ class OptimizationLoop:
             train_x[index] = torch.cat([train_x[index], new_x_list[index]])
             train_y[index] = torch.cat([train_y[index], new_y])
             model = self.update_model(X=train_x, y=train_y)
-
+            budget_consumed += self.costs[index]
             print(
                 f"\nBatch{iteration:>2} finished: best value (EI) = "
                 f"({best_observed_value:>4.5f}), best location " + str(
@@ -106,7 +108,8 @@ class OptimizationLoop:
                                  acqf_recommended_location=new_x_list[index],
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(
                                      new_x_list[index]),
-                                 acqf_recommended_output_index=index, acqf_values=kg_values_list)
+                                 acqf_recommended_output_index=index, acqf_values=kg_values_list,
+                                 budget_consumed=budget_consumed)
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
@@ -115,8 +118,7 @@ class OptimizationLoop:
 
     def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
                         acqf_recommended_output_index, acqf_recommended_location, acqf_recommended_location_true_value,
-                        model_length_scales,
-                        acqf_values=None):
+                        model_length_scales, budget_consumed, acqf_values=None):
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
         self.results.save_model_length_scales(model_length_scales)
@@ -130,6 +132,7 @@ class OptimizationLoop:
         self.results.save_acqf_recommended_output_index(acqf_recommended_output_index)
         self.results.save_acqf_recommended_location(acqf_recommended_location)
         self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
+        self.results.save_budget_consumed(budget_consumed)
         self.results.generate_pkl_file()
 
     def evaluate_location_true_quality(self, X):
@@ -232,7 +235,10 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
         model = self.update_model(train_x, train_y)
 
         start_time = time.time()
-        for iteration in range(self.budget):
+        iteration = 0
+        budget_consumed = 0
+        while budget_consumed <= self.budget:
+            iteration += 1
             best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,
                 train_x=train_x,
@@ -258,33 +264,36 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                                                           smart_initial_locations=best_observed_location)
                 kg_values_list[task_idx] = kgvalue
                 new_x_list.append(new_x)
-            new_x_ckg, acqf_value_ckg = self.get_best_coupled_kg_value(best_observed_location, best_observed_value, iteration, model)
+            new_x_ckg, acqf_value_ckg = self.get_best_coupled_kg_value(best_observed_location, best_observed_value,
+                                                                       iteration, model)
             idx_to_eval = self.compute_important_idxs(model, new_x_ckg)
             total_cost_filtered = torch.sum(self.costs[idx_to_eval])
             best_ckG_value_per_cost = acqf_value_ckg / total_cost_filtered
             best_dckg_value_per_cost = torch.max(torch.tensor(kg_values_list[:-1]) / self.costs)
             kg_values_list[-1] = best_ckG_value_per_cost
-            if best_ckG_value_per_cost > best_dckg_value_per_cost: # Run coupled cKG
+            if best_ckG_value_per_cost > best_dckg_value_per_cost:  # Run coupled cKG
                 for task_idx in idx_to_eval:
                     new_output = self.evaluate_black_box_func(new_x_ckg, task_idx)
                     train_x[task_idx] = torch.cat([train_x[task_idx], new_x_ckg])
                     train_y[task_idx] = torch.cat([train_y[task_idx], new_output])
-                index = idx_to_eval # Will have to change for non-ones costs
+                index = idx_to_eval  # Will have to change for non-ones costs
                 location_to_sample = new_x_ckg
-            else: # Run dcKG
+                budget_consumed += torch.sum(total_cost_filtered)
+            else:  # Run dcKG
                 index = torch.argmax(torch.tensor(kg_values_list[:-1]) / self.costs)
                 new_y = self.evaluate_black_box_func(new_x_list[index], index)
                 train_x[index] = torch.cat([train_x[index], new_x_list[index]])
                 train_y[index] = torch.cat([train_y[index], new_y])
                 location_to_sample = new_x_list[index]
                 index = [index.item()]
+                budget_consumed += torch.sum(self.costs[index])
             model = self.update_model(X=train_x, y=train_y)
             print(
                 f"\nBatch{iteration:>2} finished: best value (EI) = "
                 f"({best_observed_value:>4.5f}), best location " + str(
                     best_observed_location.numpy()) + " current sample decision x: " + str(
-                    location_to_sample.numpy()) + f" on tasks "+str(index) +"\n",
-                end="",)
+                    location_to_sample.numpy()) + f" on tasks " + str(index) + "\n",
+                end="", )
 
             self.save_parameters(train_x=train_x,
                                  train_y=train_y,
@@ -295,9 +304,9 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                                  acqf_recommended_location=location_to_sample,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(
                                      location_to_sample),
-                                 acqf_recommended_output_index=index, acqf_values=kg_values_list)
+                                 acqf_recommended_output_index=index, acqf_values=kg_values_list,
+                                 budget_consumed = budget_consumed)
 
-            
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
@@ -347,7 +356,10 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
         model = self.update_model(train_x, train_y)
 
         start_time = time.time()
-        for iteration in range(self.budget):
+        iteration = 0
+        consumed_budget = 0
+        while consumed_budget < self.budget:
+            iteration += 1
             best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,
                 train_x=train_x,
@@ -386,6 +398,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                 if probability_infeasibility[i] > 0.1:
                     # print(evaluation_order[i]+1)
                     new_y = self.evaluate_black_box_func(new_x, evaluation_order[i] + 1)
+                    consumed_budget += self.costs[evaluation_order[i] + 1]
                     train_x[evaluation_order[i] + 1] = torch.cat([train_x[evaluation_order[i] + 1], new_x])
                     train_y[evaluation_order[i] + 1] = torch.cat([train_y[evaluation_order[i] + 1], new_y])
                     model = self.update_model(X=train_x, y=train_y)
@@ -398,6 +411,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                 elif probability_infeasibility[i] < 0.1 and j == 0:
                     # print(0)
                     new_y = self.evaluate_black_box_func(new_x, 0)
+                    consumed_budget += self.costs[0]
                     train_x[0] = torch.cat([train_x[0], new_x])
                     train_y[0] = torch.cat([train_y[0], new_y])
                     model = self.update_model(X=train_x, y=train_y)
@@ -409,6 +423,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                 else:
                     # print(evaluation_order[i]+1)
                     new_y = self.evaluate_black_box_func(new_x, evaluation_order[i] + 1)
+                    consumed_budget += self.costs[evaluation_order[i] + 1]
                     train_x[evaluation_order[i] + 1] = torch.cat([train_x[evaluation_order[i] + 1], new_x])
                     train_y[evaluation_order[i] + 1] = torch.cat([train_y[evaluation_order[i] + 1], new_y])
                     model = self.update_model(X=train_x, y=train_y)
@@ -421,6 +436,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
             if i == size - 1 and j == 0:
                 # print(0)
                 new_y = self.evaluate_black_box_func(new_x, 0)
+                consumed_budget += self.costs[0]
                 train_x[0] = torch.cat([train_x[0], new_x])
                 train_y[0] = torch.cat([train_y[0], new_y])
                 model = self.update_model(X=train_x, y=train_y)
@@ -442,7 +458,8 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                                  acqf_recommended_location=new_x,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),
                                  failing_constraint=(k),
-                                 func_evals=evaluated_idx)  # last one gives index of failing constraint
+                                 func_evals=evaluated_idx,
+                                 consumed_budget=consumed_budget)  # last one gives index of failing constraint
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
@@ -451,6 +468,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
 
     def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
                         acqf_recommended_location, acqf_recommended_location_true_value, failing_constraint, func_evals,
+                        consumed_budget,
                         **kwargs):
 
         self.results.random_seed(self.seed)
@@ -466,6 +484,7 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
         self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
         self.results.save_failing_constraint(failing_constraint)
         self.results.save_evaluated_functions(func_evals)
+        self.results.save_budget_consumed(consumed_budget)
         self.results.generate_pkl_file()
 
     def compute_next_sample(self, acquisition_function, smart_initial_locations=None):
@@ -563,7 +582,8 @@ class EI_OptimizationLoop(OptimizationLoop):
     def get_smart_initialization(self, acquisition_function, model, best_observed_location):
         if isinstance(acquisition_function, DecopledHybridConstrainedKnowledgeGradient):
             test_x = self.lhs_sampling(1000)
-            constrained_posterior_mean = ConstrainedPosteriorMean(model, maximize=True, penalty_value=self.penalty_value)
+            constrained_posterior_mean = ConstrainedPosteriorMean(model, maximize=True,
+                                                                  penalty_value=self.penalty_value)
             feasibility = constrained_posterior_mean._compute_feasibility(test_x)
             feasible_x_locations = test_x[feasibility > 0.1, :]
             if feasible_x_locations.shape[0] == 0:
@@ -653,7 +673,10 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
         model = self.update_model(train_x, train_y)
 
         start_time = time.time()
-        for iteration in range(self.budget):
+        budget_consumed = 0
+        iteration = 0
+        while (budget_consumed < self.budget):
+            iteration += 1
             best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,
                 train_x=train_x,
@@ -694,7 +717,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
             train_x[index] = torch.cat([train_x[index], new_x])
             train_y[index] = torch.cat([train_y[index], new_y])
             model = self.update_model(X=train_x, y=train_y)
-
+            budget_consumed += self.costs[index]
             print(
                 f"\nBatch{iteration:>2} finished: best value (EI) = "
                 f"({best_observed_value:>4.5f}), best location " + str(
@@ -702,13 +725,17 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
                     new_x.numpy()) + f" on task {index}", end="\n"
             )
 
-            self.save_parameters(train_x=train_x, train_y=train_y, best_predicted_location=best_observed_location,
+            self.save_parameters(train_x=train_x,
+                                 train_y=train_y,
+                                 best_predicted_location=best_observed_location,
                                  model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location_value=self.evaluate_location_true_quality(
                                      best_observed_location), acqf_recommended_output_index=index,
                                  acqf_recommended_location=new_x,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),
-                                 failing_constraint="None", acqf_values=kg_values_list)
+                                 failing_constraint="None",
+                                 acqf_values=kg_values_list,
+                                 budget_consumed=budget_consumed)
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
 
@@ -717,7 +744,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
 
     def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
                         acqf_recommended_output_index, acqf_recommended_location, acqf_recommended_location_true_value,
-                        failing_constraint, acqf_values, **kwargs):
+                        failing_constraint, acqf_values, budget_consumed, **kwargs):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
@@ -733,6 +760,7 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
         self.results.save_acqf_values(acqf_values)
         self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
         self.results.save_failing_constraint(failing_constraint)
+        self.results.save_budget_consumed(budget_consumed)
 
         self.results.generate_pkl_file()
 
