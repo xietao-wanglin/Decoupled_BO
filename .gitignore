@@ -134,3 +134,6 @@ dmypy.json
 # Data
 *.pkl
 *.out
+
+# Slurm scripts
+*.slurm
