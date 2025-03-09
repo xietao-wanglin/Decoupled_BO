@@ -11,7 +11,6 @@ from botorch.test_functions.base import ConstrainedBaseTestProblem
 from botorch.utils.transforms import unnormalize
 from torch import Tensor
 
-
 class MOPTA08(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 1.0)] * 124
 
@@ -325,45 +324,6 @@ class MysteryFunctionSuperRedundant(ConstrainedBaseTestProblem):
             raise
 
 
-class ConstrainedFunc3_ALT(ConstrainedBaseTestProblem):
-    _bounds = [(0.0, 1.0), (0.0, 1.0)]
-
-    def __init__(self, noise_std=0.0, negate=False):
-        self.dim = 2
-        super().__init__(noise_std=noise_std, negate=negate)
-        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
-
-    def evaluate_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
-        t1 = (X_tf[..., 0] - 1) ** 2
-        t2 = (X_tf[..., 1] - 0.5) ** 2
-        return -t1 - t2
-
-    def evaluate_slack_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
-        c1 = ((X_tf[..., 0] - 3) ** 2 + (X_tf[..., 1] + 2) ** 2) * torch.exp(-(X_tf[..., 1]) ** 7) - 12
-        c2 = 10 * X_tf[..., 0] + X_tf[..., 1] - 7
-        c3 = (X_tf[..., 0] - 0.5) ** 2 + (X_tf[..., 1] - 0.5) ** 2 - 0.2
-        return torch.max(c1, torch.max(c2, c3))
-
-    def evaluate_black_box(self, X: Tensor) -> Tensor:
-        y = self.evaluate_true(X).reshape(-1, 1)
-        c1 = self.evaluate_slack_true(X).reshape(-1, 1)
-        print(y.shape, c1.shape)
-        return torch.concat([y, c1], dim=1)
-
-    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
-        assert task_index <= 1, "Maximum of 2 Outputs allowed (task_index <= 1)"
-        assert task_index >= 0, "No negative values for task_index allowed"
-        if task_index == 0:
-            return self.forward(X)
-        elif task_index == 1:
-            return self.evaluate_slack_true(X)
-        else:
-            print("Error evaluate_task")
-            raise
-
-
 class ConstrainedFunc3(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 1.0), (0.0, 1.0)]
 
@@ -423,3 +383,179 @@ class ConstrainedFunc3(ConstrainedBaseTestProblem):
         else:
             print("Error evaluate_task")
             raise
+
+class PressureVessel(ConstrainedBaseTestProblem):
+    _bounds = [(0.0, 10.0), (0.0, 10.0), (10.0, 50.0), (150.0, 200.0)]
+
+    def get_number_of_constraints(self):
+        return 4
+
+    def get_penalty(self):
+        return 4.0 # placeholder, not guaranteed to be optimal
+
+    def get_name(self):
+        return "pressure_vessel"
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 4
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
+        x1 = torch.round(x1 / 0.0625) * 0.0625
+        x2 = torch.round(x2 / 0.0625) * 0.0625
+        return (
+            0.6224 * x1 * x3 * x4
+            + 1.7781 * x2 * x3.pow(2)
+            + 3.1661 * x1.pow(2) * x4
+            + 19.84 * x1.pow(2) * x3
+        )
+    
+    def evaluate_slack_true(self, X: Tensor) -> Tensor:
+        pass
+
+    def evaluate_slack1_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x3 = X_tf[..., 0], X_tf[..., 2]
+        return -x1 + 0.0193 * x3
+
+    def evaluate_slack2_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x2, x3 = X_tf[..., 1], X_tf[..., 2]
+        return -x2 + 0.00954 * x3
+
+    def evaluate_slack3_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x3, x4 = X_tf[..., 2], X_tf[..., 3]
+        return -math.pi * x3.pow(2) * x4 - (4 / 3) * math.pi * x3.pow(3) + 1296000.0
+
+    def evaluate_slack4_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x4 = X_tf[..., 3]
+        return x4 - 240.0
+
+    def evaluate_black_box(self, X: Tensor) -> Tensor:
+        y = self.evaluate_true(X).reshape(-1, 1)
+        c1 = self.evaluate_slack1_true(X).reshape(-1, 1)
+        c2 = self.evaluate_slack2_true(X).reshape(-1, 1)
+        c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
+        c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
+        return torch.concat([y, c1, c2, c3, c4], dim=1)
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert 0 <= task_index <= 4, "Task index must be between 0 and 4"
+        if task_index == 0:
+            return self.forward(X)
+        elif task_index == 1:
+            return self.evaluate_slack1_true(X)
+        elif task_index == 2:
+            return self.evaluate_slack2_true(X)
+        elif task_index == 3:
+            return self.evaluate_slack3_true(X)
+        elif task_index == 4:
+            return self.evaluate_slack4_true(X)
+        else:
+            raise ValueError("Invalid task index")
+
+
+class WeldedBeamSO(ConstrainedBaseTestProblem):
+    _bounds = [(0.125, 10.0), (0.1, 10.0), (0.1, 10.0), (0.1, 10.0)]
+
+    def get_number_of_constraints(self):
+        return 6
+
+    def get_penalty(self):
+        return 4.0 # placeholder, not guaranteed to be optimal
+
+    def get_name(self):
+        return "welded_beam"
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 4
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4 = X_tf.unbind(-1)
+        return 1.10471 * x1.pow(2) * x2 + 0.04811 * x3 * x4 * (14.0 + x2)
+    
+    def evaluate_slack_true(self, X: Tensor) -> Tensor:
+        pass
+
+    def evaluate_slack1_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
+        P, L, E, G, t_max = 6000.0, 14.0, 30e6, 12e6, 13600.0
+        M = P * (L + x2 / 2)
+        R = torch.sqrt(0.25 * (x2.pow(2) + (x1 + x3).pow(2)))
+        J = 2 * math.sqrt(2) * x1 * x2 * (x2.pow(2) / 12 + 0.25 * (x1 + x3).pow(2))
+        t1 = P / (math.sqrt(2) * x1 * x2)
+        t2 = M * R / J
+        t = torch.sqrt(t1.pow(2) + t1 * t2 * x2 / R + t2.pow(2))
+        return t - t_max
+
+    def evaluate_slack2_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x2, x3, x4 = X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
+        P, L, s_max = 6000.0, 14.0, 30000.0
+        s = 6 * P * L / (x4 * x3.pow(2))
+        return s - s_max
+
+    def evaluate_slack3_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x4 = X_tf[..., 0], X_tf[..., 3]
+        return x1 - x4
+
+    def evaluate_slack4_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
+        return 0.10471 * x1.pow(2) + 0.04811 * x3 * x4 * (14.0 + x2) - 5.0
+
+    def evaluate_slack5_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x3, x4 = X_tf[..., 2], X_tf[..., 3]
+        P, L, E, d_max = 6000.0, 14.0, 30e6, 0.25
+        d = 4 * P * L**3 / (E * x3.pow(3) * x4)
+        return d - d_max
+
+    def evaluate_slack6_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x3, x4 = X_tf[..., 2], X_tf[..., 3]
+        P, L, E, G = 6000.0, 14.0, 30e6, 12e6
+        P_c = (
+            4.013 * E * x3 * x4.pow(3) * 6 / (L**2)
+            * (1 - 0.25 * x3 * math.sqrt(E / G) / L)
+        )
+        return P - P_c
+
+    def evaluate_black_box(self, X: Tensor) -> Tensor:
+        y = self.evaluate_true(X).reshape(-1, 1)
+        c1 = self.evaluate_slack1_true(X).reshape(-1, 1)
+        c2 = self.evaluate_slack2_true(X).reshape(-1, 1)
+        c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
+        c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
+        c5 = self.evaluate_slack5_true(X).reshape(-1, 1)
+        c6 = self.evaluate_slack6_true(X).reshape(-1, 1)
+        return torch.concat([y, c1, c2, c3, c4, c5, c6], dim=1)
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert 0 <= task_index <= 6, "Task index must be between 0 and 6"
+        if task_index == 0:
+            return self.forward(X)
+        elif task_index == 1:
+            return self.evaluate_slack1_true(X)
+        elif task_index == 2:
+            return self.evaluate_slack2_true(X)
+        elif task_index == 3:
+            return self.evaluate_slack3_true(X)
+        elif task_index == 4:
+            return self.evaluate_slack4_true(X)
+        elif task_index == 5:
+            return self.evaluate_slack5_true(X)
+        elif task_index == 6:
+            return self.evaluate_slack6_true(X)
+        else:
+            raise ValueError("Invalid task index")

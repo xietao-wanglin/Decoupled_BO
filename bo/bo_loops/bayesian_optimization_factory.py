@@ -28,7 +28,10 @@ class BayesianOptimizationLoopFactory:
 
     def create(self, bayesian_optimization_loop_type: BayesianOptimizationLoopType):
         number_initial_designs = 6
-        bounds = torch.tensor([[0.0, 0.0], [1.0, 1.0]], device=device, dtype=dtype)
+        dim = self.black_box_function.dim
+        bounds = torch.zeros(2, dim, device=device, dtype=dtype)
+        bounds[0] = 0.0
+        bounds[1] = 1.0
         performance_type = "model"
         if bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_CKG:
             print('\n Starting dcKG + cKG:')

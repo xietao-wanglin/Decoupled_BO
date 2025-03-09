@@ -9,7 +9,7 @@ from bo.bo_loops.bayesian_optimization_factory import BayesianOptimizationLoopFa
 from bo.bo_loops.bayesian_optimization_loop_type import BayesianOptimizationLoopType
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper, obj_callable, constraint_callable_wrapper
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
-    MysteryFunctionSuperRedundant
+    MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel
 
 device = torch.device("cpu")
 dtype = torch.double
@@ -134,7 +134,9 @@ if __name__ == '__main__':
     parser.add_argument("--function", type=str, choices=["Mystery",
                                                          "MysteryRedundant",
                                                          "Branin",
-                                                         "TestFunc3"], required=True,
+                                                         "TestFunc3",
+                                                         "WeldedBeam",
+                                                         "PressureVessel"], required=True,
                         help="Choose the function: Mystery, MysteryRedundant, TestFunc3 or Branin")
 
     parser.add_argument(
@@ -165,6 +167,12 @@ if __name__ == '__main__':
     elif args.function == "Branin":
         black_box_function = ConstrainedBraninNew(noise_std=1e-6,
                                                   negate=True)
+    elif args.function == "WeldedBeam":
+        black_box_function = WeldedBeamSO(noise_std=1e-6,
+                                          negate=True)
+    elif args.function == "PressureVessel":
+        black_box_function = PressureVessel(noise_std=1e-6,
+                                          negate=True)
     else:
         raise ValueError(f"Function {args.function} is not supported.")
 
