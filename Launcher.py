@@ -23,8 +23,8 @@ def run_experiment_decoupled_acquisition_functions(black_box_function,
                                                    seed=1):
     filename_pf = black_box_function.get_name()
     number_of_constraints = black_box_function.get_number_of_constraints()
-    costs = torch.ones(number_of_constraints + 1)
     for i in range(number_of_constraints + 1):
+        costs = torch.ones(number_of_constraints + 1)
         costs[i] = cost
         if i == 0:
             cost_label = "_expensive_objective_with_" + str(cost)

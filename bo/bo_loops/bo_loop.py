@@ -118,7 +118,7 @@ class OptimizationLoop:
 
     def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
                         acqf_recommended_output_index, acqf_recommended_location, acqf_recommended_location_true_value,
-                        model_length_scales, budget_consumed, acqf_values=None):
+                        model_length_scales, budget_consumed, acqf_values=None, cost_configuration=None):
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
         self.results.save_model_length_scales(model_length_scales)
@@ -133,6 +133,7 @@ class OptimizationLoop:
         self.results.save_acqf_recommended_location(acqf_recommended_location)
         self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
         self.results.save_budget_consumed(budget_consumed)
+        self.results.save_cost_configurations(cost_configuration)
         self.results.generate_pkl_file()
 
     def evaluate_location_true_quality(self, X):
@@ -305,8 +306,10 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                                  acqf_recommended_location=location_to_sample,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(
                                      location_to_sample),
-                                 acqf_recommended_output_index=index, acqf_values=kg_values_list,
-                                 budget_consumed = budget_consumed)
+                                 acqf_recommended_output_index=index,
+                                 acqf_values=kg_values_list,
+                                 budget_consumed=budget_consumed,
+                                 cost_configuration=self.costs)
 
             middle_time = time.time() - start_time
             print(f'took {middle_time} seconds')
@@ -569,7 +572,6 @@ class EI_OptimizationLoop(OptimizationLoop):
             )
 
             self.save_parameters(train_x=train_x, train_y=train_y, best_predicted_location=best_observed_location,
-                                 model_length_scales=self.model_wrapper.get_model_length_scales(),
                                  best_predicted_location_value=self.evaluate_location_true_quality(
                                      best_observed_location), acqf_recommended_location=new_x,
                                  acqf_recommended_location_true_value=self.evaluate_location_true_quality(new_x),

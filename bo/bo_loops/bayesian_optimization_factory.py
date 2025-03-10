@@ -46,6 +46,7 @@ class BayesianOptimizationLoopFactory:
                                                           budget=self.budget,
                                                           number_initial_designs=number_initial_designs,
                                                           results=results,
+                                                          costs=self.costs,
                                                           penalty_value=torch.tensor([self.penalty_value]))
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG:
@@ -60,6 +61,7 @@ class BayesianOptimizationLoopFactory:
                                        seed=self.seed,
                                        budget=self.budget,
                                        number_initial_designs=number_initial_designs,
+                                       costs=self.costs,
                                        results=results,
                                        penalty_value=torch.tensor([self.penalty_value]))
 
@@ -75,6 +77,7 @@ class BayesianOptimizationLoopFactory:
                                                       seed=self.seed,
                                                       budget=self.budget,
                                                       number_initial_designs=number_initial_designs,
+                                                      costs=self.costs,
                                                       results=results,
                                                       penalty_value=torch.tensor([self.penalty_value]))
 
@@ -90,6 +93,7 @@ class BayesianOptimizationLoopFactory:
                                                     seed=self.seed,
                                                     budget=self.budget,
                                                     number_initial_designs=number_initial_designs,
+                                                    costs=self.costs,
                                                     results=results,
                                                     penalty_value=torch.tensor([self.penalty_value]))
 
@@ -106,6 +110,7 @@ class BayesianOptimizationLoopFactory:
                                           budget=int(self.budget / (self.number_of_constraints + 1)),
                                           number_initial_designs=number_initial_designs,
                                           results=results,
+                                          costs=self.costs,
                                           penalty_value=torch.tensor([self.penalty_value]))
 
         # Coupled cKG

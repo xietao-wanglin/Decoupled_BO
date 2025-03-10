@@ -11,6 +11,7 @@ class Results:
         self.performance_type = None
         self.number_initial_samples = None
         self.budget = None
+        self.cost_configurations = None
         self.budget_consumed = []
         self.model_length_scales = []
         self.acqf_values = []
@@ -73,6 +74,9 @@ class Results:
     def save_model_length_scales(self, model_length_scales):
         self.model_length_scales.append(model_length_scales)
 
+    def save_cost_configurations(self, cost_configuration):
+        self.cost_configurations = cost_configuration
+
     def generate_pkl_file(self):
         # Create a directory called 'results' if it doesn't exist
         results_dir = 'results'
@@ -95,6 +99,7 @@ class Results:
                 "model_lengthscales": self.model_length_scales,
                 "number_initial_designs": self.number_initial_samples,
                 "budget": self.budget,
+                "cost_configurations": self.cost_configurations,
                 "performance_type": self.performance_type,
                 "seed": self.seed,
                 "input_data": self.input_data,
