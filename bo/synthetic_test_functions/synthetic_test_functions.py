@@ -391,7 +391,7 @@ class PressureVessel(ConstrainedBaseTestProblem):
         return 4
 
     def get_penalty(self):
-        return 4.0 # placeholder, not guaranteed to be optimal
+        return 269000.0 # Maximum is around 268658.84375 
 
     def get_name(self):
         return "pressure_vessel"
@@ -467,7 +467,7 @@ class WeldedBeamSO(ConstrainedBaseTestProblem):
         return 6
 
     def get_penalty(self):
-        return 4.0 # placeholder, not guaranteed to be optimal
+        return 1221.0 # Maximum is around 1220.174
 
     def get_name(self):
         return "welded_beam"
