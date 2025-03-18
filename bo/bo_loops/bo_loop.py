@@ -604,7 +604,7 @@ class EI_OptimizationLoop(OptimizationLoop):
 
         self.results.random_seed(self.seed)
         self.results.save_budget(self.budget)
-        self.results.save_model_length_scales(kwargs["model_length_scales"])
+        #self.results.save_model_length_scales(kwargs["model_length_scales"])
         self.results.save_input_data(train_x)
         self.results.save_output_data(train_y)
         self.results.save_number_initial_points(self.number_initial_designs)

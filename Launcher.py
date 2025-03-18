@@ -23,13 +23,9 @@ def run_experiment_decoupled_acquisition_functions(black_box_function,
                                                    seed=1):
     filename_pf = black_box_function.get_name()
     number_of_constraints = black_box_function.get_number_of_constraints()
-    for i in range(number_of_constraints + 1):
+    if cost is None: 
         costs = torch.ones(number_of_constraints + 1)
-        costs[i] = cost
-        if i == 0:
-            cost_label = "_expensive_objective_with_" + str(cost)
-        else:
-            cost_label = "_expensive_constraint_" + str(i) + "_with_" + str(cost)
+        cost_label = "_equal_cost"
 
         model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints)
         constrained_obj = ConstrainedMCObjective(
@@ -46,6 +42,30 @@ def run_experiment_decoupled_acquisition_functions(black_box_function,
 
         bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm)
         bo_loop.run()
+    else:
+        for i in range(number_of_constraints + 1):
+            costs = torch.ones(number_of_constraints + 1)
+            costs[i] = cost
+            if i == 0:
+                cost_label = "_expensive_objective_with_" + str(cost)
+            else:
+                cost_label = "_expensive_constraint_" + str(i) + "_with_" + str(cost)
+
+            model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints)
+            constrained_obj = ConstrainedMCObjective(
+                objective=obj_callable,
+                constraints=[constraint_callable_wrapper(idx) for idx in range(1, number_of_constraints + 1)],
+            )
+            bo_loop_factory = BayesianOptimizationLoopFactory(black_box_function=black_box_function,
+                                                            constrained_obj=constrained_obj, model=model, seed=seed,
+                                                            budget=budget,
+                                                            penalty_value=torch.tensor(
+                                                                [black_box_function.get_penalty()]),
+                                                            costs=costs, number_of_constraints=number_of_constraints,
+                                                            base_file_name=filename_pf + cost_label)
+
+            bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm)
+            bo_loop.run()
 
 
 def run_experiment_coupled_acquisition_functions(black_box_function, budget, seed,
@@ -77,7 +97,6 @@ def get_bo_algorithms(decoupled: bool):
         return [
             BayesianOptimizationLoopType.DCKG_CKG,
             BayesianOptimizationLoopType.DCKG,
-            BayesianOptimizationLoopType.DEI,
             BayesianOptimizationLoopType.EIKG,
         ]
     return [
@@ -178,7 +197,7 @@ if __name__ == '__main__':
 
     # Parameters
     budgets = [150]
-    costs = [5]
+    costs = [None]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)
 
