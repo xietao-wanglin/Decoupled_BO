@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 from botorch.test_functions.base import ConstrainedBaseTestProblem
 from botorch.utils.transforms import unnormalize
+from botorch.test_functions.utils import round_nearest
 from torch import Tensor
 
 class MOPTA08(ConstrainedBaseTestProblem):
@@ -399,13 +400,13 @@ class PressureVessel(ConstrainedBaseTestProblem):
     def __init__(self, noise_std=0.0, negate=False):
         self.dim = 4
         super().__init__(noise_std=noise_std, negate=negate)
-        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float)
 
     def evaluate_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3, x4 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
-        x1 = torch.round(x1 / 0.0625) * 0.0625
-        x2 = torch.round(x2 / 0.0625) * 0.0625
+        x1 = round_nearest(x1, increment=0.0625, bounds=self._bounds[0])
+        x2 = round_nearest(x2, increment=0.0625, bounds=self._bounds[1])
         return (
             0.6224 * x1 * x3 * x4
             + 1.7781 * x2 * x3.pow(2)
@@ -417,22 +418,22 @@ class PressureVessel(ConstrainedBaseTestProblem):
         pass
 
     def evaluate_slack1_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x3 = X_tf[..., 0], X_tf[..., 2]
         return -x1 + 0.0193 * x3
 
     def evaluate_slack2_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x2, x3 = X_tf[..., 1], X_tf[..., 2]
         return -x2 + 0.00954 * x3
 
     def evaluate_slack3_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x3, x4 = X_tf[..., 2], X_tf[..., 3]
         return -math.pi * x3.pow(2) * x4 - (4 / 3) * math.pi * x3.pow(3) + 1296000.0
 
     def evaluate_slack4_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x4 = X_tf[..., 3]
         return x4 - 240.0
 

@@ -2,7 +2,7 @@ import torch
 from botorch.utils.testing import BotorchTestCase
 from botorch.utils.transforms import normalize
 
-from bo.synthetic_test_functions.synthetic_test_functions import MysteryFunction, ConstrainedBraninNew, ConstrainedFunc3
+from bo.synthetic_test_functions.synthetic_test_functions import MysteryFunction, ConstrainedBraninNew, ConstrainedFunc3, PressureVessel, WeldedBeamSO
 
 
 class TestDecoupledKG(BotorchTestCase):
@@ -54,3 +54,56 @@ class TestDecoupledKG(BotorchTestCase):
         self.assertEqual(True, is_location_feasible1)
         self.assertEqual(True, is_location_feasible2)
         self.assertEqual(True, is_location_feasible3)
+
+    def test_pressure_vessel(self):
+        expected_best_fval = 6059.946341 
+        best_recommended_point = torch.tensor([0.812500 , 0.437500, 42.097398, 176.654047])
+        bounds = torch.tensor([[0.0, 0.0, 10.0, 150.0], [10.0, 10.0, 50.0, 200.0]])
+        normalized_best_recommended_point = normalize(best_recommended_point, bounds=bounds)
+        function = PressureVessel(negate=True)
+
+        actual_best_fval = -function.evaluate_task(normalized_best_recommended_point, 0)
+        actual_constraint1_value = function.evaluate_task(normalized_best_recommended_point, 1)
+        actual_constraint2_value = function.evaluate_task(normalized_best_recommended_point, 2)
+        actual_constraint3_value = function.evaluate_task(normalized_best_recommended_point, 3)
+        actual_constraint4_value = function.evaluate_task(normalized_best_recommended_point, 4)
+        is_location_feasible1 = actual_constraint1_value <= 0
+        is_location_feasible2 = actual_constraint2_value <= 0
+        is_location_feasible3 = actual_constraint3_value <= 0
+        is_location_feasible4 = actual_constraint4_value <= 0
+
+        self.assertAllClose(torch.tensor(expected_best_fval), actual_best_fval, rtol=1e-2)
+        self.assertEqual(True, is_location_feasible1)
+        self.assertEqual(True, is_location_feasible2)
+        self.assertEqual(True, is_location_feasible3)
+        self.assertEqual(True, is_location_feasible4)
+
+    def test_welded_beam(self):
+        expected_best_fval = 1.728226 
+        best_recommended_point = torch.tensor([0.205986 , 3.471328, 9.020224 , 0.206480])
+        bounds = torch.tensor([[0.125, 0.1, 0.1, 0.1], [10.0, 10.0, 10.0, 10.0]])
+        normalized_best_recommended_point = normalize(best_recommended_point, bounds=bounds)
+        function = WeldedBeamSO(negate=True)
+
+        actual_best_fval = -function.evaluate_task(normalized_best_recommended_point, 0)
+        actual_constraint1_value = function.evaluate_task(normalized_best_recommended_point, 1)
+        actual_constraint2_value = function.evaluate_task(normalized_best_recommended_point, 2)
+        actual_constraint3_value = function.evaluate_task(normalized_best_recommended_point, 3)
+        actual_constraint4_value = function.evaluate_task(normalized_best_recommended_point, 4)
+        actual_constraint5_value = function.evaluate_task(normalized_best_recommended_point, 5)
+        actual_constraint6_value = function.evaluate_task(normalized_best_recommended_point, 6)
+        is_location_feasible1 = actual_constraint1_value <= 0
+        is_location_feasible2 = actual_constraint2_value <= 0
+        is_location_feasible3 = actual_constraint3_value <= 0
+        is_location_feasible4 = actual_constraint4_value <= 0
+        is_location_feasible5 = actual_constraint5_value <= 0
+        is_location_feasible6 = actual_constraint6_value <= 0
+
+        self.assertAllClose(torch.tensor(expected_best_fval), actual_best_fval, rtol=1e-4)
+        self.assertEqual(True, is_location_feasible1)
+        self.assertEqual(True, is_location_feasible2)
+        self.assertEqual(True, is_location_feasible3)
+        self.assertEqual(True, is_location_feasible4)
+        self.assertEqual(True, is_location_feasible5)
+        self.assertEqual(True, is_location_feasible6)
+    
