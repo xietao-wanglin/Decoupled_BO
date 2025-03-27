@@ -27,8 +27,11 @@ class BayesianOptimizationLoopFactory:
         self.black_box_function = black_box_function
 
     def create(self, bayesian_optimization_loop_type: BayesianOptimizationLoopType):
-        number_initial_designs = 6
         dim = self.black_box_function.dim
+        if dim == 2:
+            number_initial_designs = 6
+        elif dim == 4:
+            number_initial_designs = 36
         bounds = torch.zeros(2, dim, device=device, dtype=dtype)
         bounds[0] = 0.0
         bounds[1] = 1.0
@@ -92,7 +95,7 @@ class BayesianOptimizationLoopFactory:
                                                     model=self.model,
                                                     seed=self.seed,
                                                     budget=self.budget,
-                                                    number_initial_designs=number_initial_designs,
+                                                    number_initial_designs=number_initial_designs, #36
                                                     costs=self.costs,
                                                     results=results,
                                                     penalty_value=torch.tensor([self.penalty_value]))
