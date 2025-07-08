@@ -14,7 +14,7 @@ settings.min_fixed_noise._global_double_value = 1e-6
 
 
 class BayesianOptimizationLoopFactory:
-    def __init__(self, black_box_function, constrained_obj, model, seed, budget, penalty_value, costs,
+    def __init__(self, black_box_function: SingleObjectiveProblem, constrained_obj, model, seed, budget, penalty_value, costs,
                  number_of_constraints, base_file_name):
         self.base_file_name = base_file_name
         self.number_of_constraints = number_of_constraints
@@ -26,12 +26,8 @@ class BayesianOptimizationLoopFactory:
         self.constrained_obj = constrained_obj
         self.black_box_function = black_box_function
 
-    def create(self, bayesian_optimization_loop_type: BayesianOptimizationLoopType):
+    def create(self, bayesian_optimization_loop_type: BayesianOptimizationLoopType, number_initial_designs):
         dim = self.black_box_function.dim
-        if dim == 2:
-            number_initial_designs = 6
-        elif dim == 4:
-            number_initial_designs = 36
         bounds = torch.zeros(2, dim, device=device, dtype=dtype)
         bounds[0] = 0.0
         bounds[1] = 1.0

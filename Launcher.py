@@ -1,7 +1,9 @@
 import argparse
 import itertools
 import logging
+import random
 
+import numpy as np
 import torch
 from botorch.acquisition import ConstrainedMCObjective
 
@@ -9,25 +11,42 @@ from bo.bo_loops.bayesian_optimization_factory import BayesianOptimizationLoopFa
 from bo.bo_loops.bayesian_optimization_loop_type import BayesianOptimizationLoopType
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper, obj_callable, constraint_callable_wrapper
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
-    MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel
+    MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem
 
 device = torch.device("cpu")
 dtype = torch.double
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-def run_experiment_decoupled_acquisition_functions(black_box_function,
+def set_all_seeds(seed):
+    """
+    Sets the random seed for reproducibility across PyTorch, NumPy, and Python's random module.
+    """
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False  # Disable benchmark for deterministic behavior
+    np.random.seed(seed)
+    random.seed(seed)
+    print(f"All random seeds set to {seed}")
+
+
+def run_experiment_decoupled_acquisition_functions(black_box_function: SingleObjectiveProblem,
                                                    bayesian_optimization_algorithm: BayesianOptimizationLoopType,
+                                                   number_of_initial_designs,
                                                    budget=100,
                                                    cost=1,
                                                    seed=1):
     filename_pf = black_box_function.get_name()
     number_of_constraints = black_box_function.get_number_of_constraints()
-    if cost is None: 
+    if cost is None:
         costs = torch.ones(number_of_constraints + 1)
         cost_label = "_equal_cost"
 
-        model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints)
+        model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints,
+                                                  is_noisy=black_box_function.is_noisy())
         constrained_obj = ConstrainedMCObjective(
             objective=obj_callable,
             constraints=[constraint_callable_wrapper(idx) for idx in range(1, number_of_constraints + 1)],
@@ -40,7 +59,7 @@ def run_experiment_decoupled_acquisition_functions(black_box_function,
                                                           costs=costs, number_of_constraints=number_of_constraints,
                                                           base_file_name=filename_pf + cost_label)
 
-        bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm)
+        bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_of_initial_designs)
         bo_loop.run()
     else:
         for i in range(number_of_constraints + 1):
@@ -51,30 +70,35 @@ def run_experiment_decoupled_acquisition_functions(black_box_function,
             else:
                 cost_label = "_expensive_constraint_" + str(i) + "_with_" + str(cost)
 
-            model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints)
+            model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints,
+                                                      is_noisy=black_box_function.is_noisy())
             constrained_obj = ConstrainedMCObjective(
                 objective=obj_callable,
                 constraints=[constraint_callable_wrapper(idx) for idx in range(1, number_of_constraints + 1)],
             )
             bo_loop_factory = BayesianOptimizationLoopFactory(black_box_function=black_box_function,
-                                                            constrained_obj=constrained_obj, model=model, seed=seed,
-                                                            budget=budget,
-                                                            penalty_value=torch.tensor(
-                                                                [black_box_function.get_penalty()]),
-                                                            costs=costs, number_of_constraints=number_of_constraints,
-                                                            base_file_name=filename_pf + cost_label)
+                                                              constrained_obj=constrained_obj, model=model, seed=seed,
+                                                              budget=budget,
+                                                              penalty_value=torch.tensor(
+                                                                  [black_box_function.get_penalty()]),
+                                                              costs=costs, number_of_constraints=number_of_constraints,
+                                                              base_file_name=filename_pf + cost_label)
 
-            bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm)
+            bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_initial_designs)
             bo_loop.run()
 
 
-def run_experiment_coupled_acquisition_functions(black_box_function, budget, seed,
-                                                 bayesian_optimization_algorithm):
+def run_experiment_coupled_acquisition_functions(black_box_function: SingleObjectiveProblem,
+                                                 budget,
+                                                 seed,
+                                                 bayesian_optimization_algorithm,
+                                                 number_of_initial_designs):
     filename_pf = black_box_function.get_name()
     number_of_constraints = black_box_function.get_number_of_constraints()
     costs = torch.ones(number_of_constraints + 1)
     cost_label = "_equal_costs_"
-    model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints)
+    model = ConstrainedDeoupledGPModelWrapper(num_constraints=number_of_constraints,
+                                              is_noisy=black_box_function.is_noisy())
     constrained_obj = ConstrainedMCObjective(
         objective=obj_callable,
         constraints=[constraint_callable_wrapper(idx) for idx in range(1, number_of_constraints + 1)],
@@ -82,12 +106,11 @@ def run_experiment_coupled_acquisition_functions(black_box_function, budget, see
     bo_loop_factory = BayesianOptimizationLoopFactory(black_box_function=black_box_function,
                                                       constrained_obj=constrained_obj, model=model, seed=seed,
                                                       budget=budget,
-                                                      penalty_value=torch.tensor(
-                                                          [black_box_function.get_penalty()]),
+                                                      penalty_value=torch.tensor([black_box_function.get_penalty()]),
                                                       costs=costs, number_of_constraints=number_of_constraints,
                                                       base_file_name=filename_pf + cost_label)
 
-    bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm)
+    bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_of_initial_designs)
     bo_loop.run()
 
 
@@ -98,6 +121,7 @@ def get_bo_algorithms(decoupled: bool):
             BayesianOptimizationLoopType.DCKG_CKG,
             BayesianOptimizationLoopType.DCKG,
             BayesianOptimizationLoopType.EIKG,
+            BayesianOptimizationLoopType.DEI,
         ]
     return [
         BayesianOptimizationLoopType.CEI,
@@ -155,7 +179,8 @@ if __name__ == '__main__':
                                                          "Branin",
                                                          "TestFunc3",
                                                          "WeldedBeam",
-                                                         "PressureVessel"], required=True,
+                                                         "PressureVessel",
+                                                         "two_layer_cnn"], required=True,
                         help="Choose the function: Mystery, MysteryRedundant, TestFunc3 or Branin")
 
     parser.add_argument(
@@ -166,7 +191,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--min-seed", type=int, default=0,
                         help="Minimum seed value (default: 0)")
-    parser.add_argument("--max-seed", type=int, required=True,
+    parser.add_argument("--max-seed", type=int, default=39,
                         help="Maximum seed value (inclusive)")
 
     args = parser.parse_args()
@@ -176,22 +201,31 @@ if __name__ == '__main__':
         black_box_function = MysteryFunctionSuperRedundant(noise_std=1e-6,
                                                            negate=True,
                                                            redundant_constraints=False)
+        number_initial_designs = 6
     elif args.function == "MysteryRedundant":
         black_box_function = MysteryFunctionSuperRedundant(noise_std=1e-6,
                                                            negate=True,
                                                            redundant_constraints=True)
+        number_initial_designs = 6
     elif args.function == "TestFunc3":
         black_box_function = ConstrainedFunc3(noise_std=1e-6,
                                               negate=True)
+        number_initial_designs = 6
     elif args.function == "Branin":
         black_box_function = ConstrainedBraninNew(noise_std=1e-6,
                                                   negate=True)
+        number_initial_designs = 6
     elif args.function == "WeldedBeam":
         black_box_function = WeldedBeamSO(noise_std=1e-6,
                                           negate=True)
+        number_initial_designs = 36
     elif args.function == "PressureVessel":
         black_box_function = PressureVessel(noise_std=1e-6,
-                                          negate=True)
+                                            negate=True)
+        number_initial_designs = 36
+    elif args.function == "two_layer_cnn":
+        black_box_function = TwoLayerCNN_train(negate=False)
+        number_initial_designs = 30
     else:
         raise ValueError(f"Function {args.function} is not supported.")
 
@@ -204,12 +238,14 @@ if __name__ == '__main__':
     # Run experiments
     for bayesian_optimization_algorithm, budget, cost, seed in itertools.product(bayesian_optimization_algorithms,
                                                                                  budgets, costs, seeds):
-
         logging.info(
             f"Running experiment | Algorithm: {bayesian_optimization_algorithm.name}, Budget: {budget}, "
             f"Seed: {seed}, Cost: {cost if args.decoupled else 'N/A'}, "
             f"Decoupled: {args.decoupled}"
         )
+
+        set_all_seeds(seed)
+
         experiment_fn = (
             run_experiment_decoupled_acquisition_functions
             if args.decoupled
@@ -221,6 +257,7 @@ if __name__ == '__main__':
             "budget": budget,
             "seed": seed,
             "bayesian_optimization_algorithm": bayesian_optimization_algorithm,
+            "number_of_initial_designs": number_initial_designs
         }
 
         if args.decoupled:

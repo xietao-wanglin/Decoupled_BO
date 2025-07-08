@@ -301,27 +301,26 @@ class ConstrainedGPModelWrapper:
 
 
 class ConstrainedDeoupledGPModelWrapper:
-    def __init__(self, num_constraints):
+    def __init__(self, num_constraints: int, is_noisy: bool):
         self.model_f = None
         self.model = None
         self.num_constraints = num_constraints
-        self.train_var_noise = torch.tensor(1e-9, device=device, dtype=dtype)
         self.num_outputs = num_constraints + 1
-
-    def getNumberOfOutputs(self):
-        return self.num_outputs
+        self.train_var_noise = None if is_noisy else torch.tensor(1e-9, device=device, dtype=dtype)
 
     def fit(self, X, Y):
         self.model_f = SingleTaskGP(train_X=X[0],
                                     train_Y=Y[0].reshape(-1, 1),
-                                    train_Yvar=self.train_var_noise.expand_as(Y[0].reshape(-1, 1)),
+                                    train_Yvar=None if self.train_var_noise is None else self.train_var_noise.expand_as(
+                                        Y[0].reshape(-1, 1)),
                                     outcome_transform=Standardize(m=1))
 
         list_of_models = [self.model_f]
         for c in range(1, self.num_constraints + 1):
             list_of_models.append(SingleTaskGP(train_X=X[c],
                                                train_Y=Y[c].reshape(-1, 1),
-                                               train_Yvar=self.train_var_noise.expand_as(Y[c].reshape(-1, 1)),
+                                               train_Yvar=None if self.train_var_noise is None else self.train_var_noise.expand_as(
+                                                   Y[c].reshape(-1, 1)),
                                                outcome_transform=Standardize(m=1)))
 
         self.model = ModelListGP(*list_of_models)
@@ -337,3 +336,6 @@ class ConstrainedDeoupledGPModelWrapper:
         for i in range(self.num_constraints + 1):
             length_scales.append(self.model.models[i].covar_module.base_kernel.lengthscale.detach())
         return length_scales
+
+    def getNumberOfOutputs(self):
+        return self.num_outputs
