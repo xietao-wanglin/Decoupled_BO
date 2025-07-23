@@ -651,7 +651,7 @@ class TwoLayerCNN_train(SingleObjectiveProblem):
         self.dim = 5
         super().__init__(noise_std=noise_std, negate=negate)
         self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
-        self.number_of_epochs = 10
+        self.number_of_epochs = 20
         self.batch_size = 128
         self.number_of_replications = 10
         self.number_of_classes = 10
