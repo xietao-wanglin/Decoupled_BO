@@ -133,7 +133,7 @@ class BayesianOptimizationLoopFactory:
                                             ei_type=AcquisitionFunctionType.OPTIMISTIC_UCB,
                                             bounds=bounds,
                                             performance_type=performance_type, model=self.model, seed=self.seed,
-                                            budget=int(self.budget / (self.number_of_constraints + 1)),
+                                            budget=self.budget,
                                             number_initial_designs=number_initial_designs, results=results,
                                             penalty_value=torch.tensor([1000]))
             bo_loop = loop
