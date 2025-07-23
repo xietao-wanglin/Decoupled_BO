@@ -122,6 +122,7 @@ def get_bo_algorithms(decoupled: bool):
             BayesianOptimizationLoopType.DCKG,
             BayesianOptimizationLoopType.EIKG,
             BayesianOptimizationLoopType.DEI,
+            BayesianOptimizationLoopType.OPTIMISTIC_UCB
         ]
     return [
         BayesianOptimizationLoopType.CEI,

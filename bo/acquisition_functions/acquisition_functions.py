@@ -9,7 +9,7 @@ from botorch.acquisition import ExpectedImprovement, \
 from botorch.acquisition.analytic import _ei_helper, PosteriorMean
 from botorch.acquisition.knowledge_gradient import _split_fantasy_points
 from botorch.acquisition.objective import PosteriorTransform
-from botorch.models import ModelListGP
+from botorch.models import ModelListGP, ModelList
 from botorch.models.model import Model
 from botorch.optim import optimize_acqf, initialize_q_batch
 from botorch.sampling import MCSampler, SobolQMCNormalSampler, ListSampler
@@ -24,6 +24,7 @@ from debug_utils.utils import record_io
 
 
 class AcquisitionFunctionType(Enum):
+    OPTIMISTIC_UCB = auto()
     COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
     MC_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
     ONESHOT_CONSTRAINED_KNOWLEDGE_GRADIENT = auto()
@@ -119,6 +120,48 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
                                                           number_of_restarts=15, x_evaluation_mask=x_eval_mask,
                                                           seed=iteration, penalty_value=penalty_value,
                                                           x_best_location=initial_condition_internal_optimizer)
+    elif type is AcquisitionFunctionType.OPTIMISTIC_UCB:
+        return OptimisticUpperConfidenceBound(model,
+                                              penalty_value=penalty_value,
+                                              iteration=iteration)
+
+
+class OptimisticUpperConfidenceBound(DecoupledAcquisitionFunction):
+
+    def __init__(self, model: ModelList, penalty_value: int, iteration: int, X_evaluation_mask: Optional[Tensor] = None,
+                 **kwargs) -> None:
+        super().__init__(model, X_evaluation_mask, **kwargs)
+        self.penalty_value = penalty_value
+        self.delta = 0.1
+        self.iteration = iteration
+
+    def forward(self, X: Tensor) -> Tensor:
+        posterior = self.model.posterior(X, observation_noise=False)
+        mean = posterior.mean
+        variance = posterior.variance
+
+        objective_mean = mean[..., 0]
+        objective_variance = variance[..., 0]
+
+        constraints_mean = mean[..., 1:]
+        constraints_variance = variance[..., 1:]
+
+        beta = self.compute_beta(X.shape[-1])
+        objective_ucb = objective_mean +  torch.sqrt(beta * objective_variance)
+        constraints_lcb = constraints_mean - torch.sqrt(beta * constraints_variance)
+
+        number_of_designs = X.shape[0]
+        number_of_constraints = constraints_variance.shape[-1]
+
+        lcb_vt = constraints_lcb.reshape((number_of_designs, number_of_constraints)) <= 0
+
+        feasible_region_mask = torch.logical_not(lcb_vt.all(dim=1)).reshape(number_of_designs)
+        objective_ucb[feasible_region_mask] = self.penalty_value
+        return objective_ucb.reshape(-1)
+
+    def compute_beta(self, designs_dimension):
+        return 2 * torch.log(torch.tensor(
+            (self.model.num_outputs * designs_dimension * self.iteration ** 2 * torch.pi ** 2) / (6 * self.delta)))
 
 
 class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, MCAcquisitionFunction):
@@ -264,7 +307,8 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
             kg_per_fantasy = torch.zeros(self.number_of_fantasies_for_constraints)
             for f in range(self.number_of_fantasies_for_constraints):
                 discretisation_per_realisation = torch.vstack([warmed_up_locations,
-                                                               chunked_discretisation[f][:, :, sample_idx].squeeze(0).squeeze(1)])
+                                                               chunked_discretisation[f][:, :, sample_idx].squeeze(
+                                                                   0).squeeze(1)])
                 objective_mean_per_realisation = torch.cat([warmed_up_locations_mean,
                                                             chunked_objective_mean[f][:, :, sample_idx].squeeze()])
                 objective_variance_per_realisation = torch.cat([warmed_up_locations_variance,
@@ -313,10 +357,11 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
                                              evaluation_mask=self.construct_evaluation_mask(X))
 
         constrained_posterior_mean_model = BatchedConstrainedPosteriorMean(fantasised_models=fantasy_model,
-                                                                    model=self.model,
-                                                                    evaluation_mask=self.construct_evaluation_mask(X),
-                                                                    penalty_value=self.penalty_value,
-                                                                    batch_size=20)
+                                                                           model=self.model,
+                                                                           evaluation_mask=self.construct_evaluation_mask(
+                                                                               X),
+                                                                           penalty_value=self.penalty_value,
+                                                                           batch_size=20)
         batch_shape = fantasy_model.batch_shape
         best_location_adapted_dimensions = self.adapt_x_location_dim(self.x_best_location, batch_shape)
         if X.shape[0] in self.cached_bestx and save_discretisation:
@@ -382,7 +427,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         predictive_variance = full_predictive_covariance.squeeze() * probability_of_feasibility.squeeze()
         return self.kgcb(a=predictive_mean,
                          b=predictive_variance,
-                         current_best_value = predictive_mean[1].detach())
+                         current_best_value=predictive_mean[1].detach())
 
     def precompute_constraints_posterior_mean(self, X, modelList):
         model = self.get_constraints_model(modelList)
@@ -420,7 +465,8 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
         predictive_mean = objective_mean.squeeze() * probability_of_feasibility.squeeze() - self.penalty_value * (
                 1 - probability_of_feasibility.squeeze())
         predictive_variance = full_predictive_covariance.squeeze() * probability_of_feasibility.squeeze()
-        return self.kgcb(a=predictive_mean, b=predictive_variance, current_best_value=torch.max(predictive_mean).detach())
+        return self.kgcb(a=predictive_mean, b=predictive_variance,
+                         current_best_value=torch.max(predictive_mean).detach())
 
     @staticmethod
     def compute_probability_of_feasibility(mean_constraints, sigma_constraints):
@@ -526,16 +572,16 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
 
             if self.use_scipy:
                 bestx, besty = gen_candidates_scipy(initial_conditions=restart_points,
-                                                acquisition_function=unconstrained_posterior_mean,
-                                                lower_bounds=bounds[0],
-                                                upper_bounds=bounds[1],
-                                                options={"maxiter": 100})
+                                                    acquisition_function=unconstrained_posterior_mean,
+                                                    lower_bounds=bounds[0],
+                                                    upper_bounds=bounds[1],
+                                                    options={"maxiter": 100})
             else:
                 bestx, besty = gen_candidates_torch(initial_conditions=restart_points,
-                                                acquisition_function=unconstrained_posterior_mean,
-                                                lower_bounds=bounds[0],
-                                                upper_bounds=bounds[1],
-                                                options={"maxiter": 100})
+                                                    acquisition_function=unconstrained_posterior_mean,
+                                                    lower_bounds=bounds[0],
+                                                    upper_bounds=bounds[1],
+                                                    options={"maxiter": 100})
         if save_discretisation:
             self.cached_bestx.clear()
             self.cached_bestx[X.shape[0]] = bestx.clone().detach()

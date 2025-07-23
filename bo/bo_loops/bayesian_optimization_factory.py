@@ -3,7 +3,7 @@ from gpytorch import settings
 from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType
 from bo.bo_loops.bayesian_optimization_loop_type import BayesianOptimizationLoopType
 from bo.bo_loops.bo_loop import OptimizationLoop, EI_Decoupled_OptimizationLoop, EI_OptimizationLoop, \
-    Decoupled_EIKG_OptimizationLoop, CoupledAndDecoupledOptimizationLoop
+    Decoupled_EIKG_OptimizationLoop, CoupledAndDecoupledOptimizationLoop, OPT_UCB_OptimizationLoop
 from bo.result_utils.result_container import Results
 from bo.synthetic_test_functions.synthetic_test_functions import *
 
@@ -14,7 +14,8 @@ settings.min_fixed_noise._global_double_value = 1e-6
 
 
 class BayesianOptimizationLoopFactory:
-    def __init__(self, black_box_function: SingleObjectiveProblem, constrained_obj, model, seed, budget, penalty_value, costs,
+    def __init__(self, black_box_function: SingleObjectiveProblem, constrained_obj, model, seed, budget, penalty_value,
+                 costs,
                  number_of_constraints, base_file_name):
         self.base_file_name = base_file_name
         self.number_of_constraints = number_of_constraints
@@ -91,7 +92,7 @@ class BayesianOptimizationLoopFactory:
                                                     model=self.model,
                                                     seed=self.seed,
                                                     budget=self.budget,
-                                                    number_initial_designs=number_initial_designs, #36
+                                                    number_initial_designs=number_initial_designs,  # 36
                                                     costs=self.costs,
                                                     results=results,
                                                     penalty_value=torch.tensor([self.penalty_value]))
@@ -123,6 +124,18 @@ class BayesianOptimizationLoopFactory:
                                        budget=int(self.budget / (self.number_of_constraints + 1)),
                                        number_initial_designs=number_initial_designs, results=results,
                                        penalty_value=torch.tensor([self.penalty_value]))
+            bo_loop = loop
+        elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.OPTIMISTIC_UCB:
+            print('\n Starting optimisitic ucb:')
+            results = Results(filename=self.base_file_name + "_optimistic_ucb" + str(self.seed) + ".pkl")
+            loop = OPT_UCB_OptimizationLoop(black_box_func=self.black_box_function,
+                                            objective=self.constrained_obj,
+                                            ei_type=AcquisitionFunctionType.OPTIMISTIC_UCB,
+                                            bounds=bounds,
+                                            performance_type=performance_type, model=self.model, seed=self.seed,
+                                            budget=int(self.budget / (self.number_of_constraints + 1)),
+                                            number_initial_designs=number_initial_designs, results=results,
+                                            penalty_value=torch.tensor([1000]))
             bo_loop = loop
         else:
             raise TypeError("Bayesian Optimization loop type not recognized")

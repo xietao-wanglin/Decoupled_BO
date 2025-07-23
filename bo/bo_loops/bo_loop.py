@@ -757,3 +757,114 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
                 return x_smart_optimised[None, :], x_smart_optimised_val
 
         return x_optimised, x_optimised_val
+
+
+class OPT_UCB_OptimizationLoop(OptimizationLoop):
+
+    def __init__(self, black_box_func: SingleObjectiveProblem, model: ConstrainedDeoupledGPModelWrapper,
+                 objective: Optional[MCAcquisitionObjective], ei_type: AcquisitionFunctionType, seed: int, budget: int,
+                 performance_type: str, bounds: Tensor, results: Results,
+                 penalty_value: Optional[Tensor] = torch.tensor([0.0]), number_initial_designs: Optional[int] = 6,
+                 costs: Optional[Tensor] = None):
+        super().__init__(black_box_func, model, objective, ei_type, seed, budget, performance_type, bounds, results,
+                         penalty_value, number_initial_designs, costs)
+
+        self.number_of_input_dimensions = self.black_box_func.dim
+
+    def run(self):
+        best_observed_all_sampled = []
+        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
+        model = self.update_model(train_x, train_y)
+
+        start_time = time.time()
+        budget_consumed = 0
+        iteration = 0
+        while budget_consumed < self.budget:
+            iteration += 1
+            best_observed_location, best_observed_value = self.best_observed(
+                best_value_computation_type=self.performance_type,
+                train_x=train_x,
+                train_y=train_y,
+                model=model,
+                bounds=self.bounds)
+            best_observed_all_sampled.append(best_observed_value)
+
+            acquisition_function = acquisition_function_factory(model=model,
+                                                                type=self.acquisition_function_type,
+                                                                objective=self.objective,
+                                                                best_value=best_observed_value,
+                                                                idx=None,
+                                                                number_of_outputs=self.number_of_outputs,
+                                                                penalty_value=-1 * self.penalty_value,
+                                                                iteration=iteration,
+                                                                initial_condition_internal_optimizer=best_observed_location)
+
+            new_x, new_fval = self.compute_next_sample(acquisition_function=acquisition_function,
+                                                       smart_initial_locations=best_observed_location)
+
+            beta = acquisition_function.compute_beta(self.number_of_input_dimensions)
+            vt = self.compute_vt(model, new_x, beta)
+            index = self.get_task_to_evaluate(beta, model, new_x, vt)
+            new_y = self.evaluate_black_box_func(new_x, index)
+            train_x[index] = torch.cat([train_x[index], new_x])
+            train_y[index] = torch.cat([train_y[index], new_y])
+            model = self.update_model(X=train_x, y=train_y)
+            budget_consumed += self.costs[index]
+
+            print(f"\nBatch{iteration:>2} finished: best value (EI) = "
+                  f"({best_observed_value:>4.5f}), best location " + str(
+                best_observed_location.numpy()) + " current sample decision x: " + str(
+                new_x.numpy()) + f" on task {index}", end="\n"
+                  )
+
+            self.save_parameters(train_x=train_x,
+                                 train_y=train_y,
+                                 best_predicted_location=best_observed_location,
+                                 model_length_scales=self.model_wrapper.get_model_length_scales(),
+                                 best_predicted_location_value=self.evaluate_location_true_quality(
+                                     best_observed_location),
+                                 acqf_recommended_output_index=index,
+                                 acqf_recommended_location=new_x,
+                                 acqf_recommended_location_true_value=None if self.black_box_func.is_expensive() else self.evaluate_location_true_quality(
+                                     new_x),
+                                 acqf_values=new_fval,
+                                 budget_consumed=budget_consumed)
+            middle_time = time.time() - start_time
+            print(f'took {middle_time} seconds')
+
+        end = time.time() - start_time
+        print(f'Total time: {end} seconds')
+
+    def save_parameters(self, train_x, train_y, best_predicted_location, best_predicted_location_value,
+                        acqf_recommended_output_index, acqf_recommended_location, acqf_recommended_location_true_value,
+                        model_length_scales, budget_consumed, acqf_values=None, cost_configuration=None):
+        self.results.random_seed(self.seed)
+        self.results.save_budget(self.budget)
+        self.results.save_model_length_scales(model_length_scales)
+        self.results.save_input_data(train_x)
+        self.results.save_output_data(train_y)
+        self.results.save_acqf_values(acqf_values)
+        self.results.save_number_initial_points(self.number_initial_designs)
+        self.results.save_performance_type(self.performance_type)
+        self.results.save_best_predicted_location(best_predicted_location)
+        self.results.save_best_predicted_location_true_value(best_predicted_location_value)
+        self.results.save_acqf_recommended_output_index(acqf_recommended_output_index)
+        self.results.save_acqf_recommended_location(acqf_recommended_location)
+        self.results.save_acqf_recommended_location_true_value(acqf_recommended_location_true_value)
+        self.results.save_budget_consumed(budget_consumed)
+        self.results.save_cost_configurations(cost_configuration)
+        self.results.generate_pkl_file()
+
+    def get_task_to_evaluate(self, beta, model, new_x, vt):
+        posterior = model.posterior(new_x, observation_noise=False)
+        constraints_mean = posterior.mean[..., 1:]
+        constraints_variance = posterior.variance[..., 1:]
+        constraints_ucb = (constraints_mean + torch.sqrt(beta * constraints_variance)).reshape(-1) / self.costs[1:]
+        constraint_index = torch.argmax(constraints_ucb)
+        if constraints_ucb[constraint_index] > vt / self.costs[0]:
+            return constraint_index + 1
+        return 0
+
+    def compute_vt(self, model, new_x, beta):
+        objective_variance = model.posterior(new_x).variance[..., 0]
+        return 2 * torch.sqrt(beta * objective_variance).reshape(1)
