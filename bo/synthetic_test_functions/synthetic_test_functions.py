@@ -15,6 +15,7 @@ import torch
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
+from botorch.models.transforms import Bilog
 from botorch.test_functions.base import ConstrainedBaseTestProblem
 from botorch.test_functions.utils import round_nearest
 from botorch.utils.transforms import unnormalize
@@ -536,18 +537,231 @@ class PressureVessel(SingleObjectiveProblem):
         else:
             raise ValueError("Invalid task index")
 
+# TODO: TensionCompresion is not working as it should. Not really optimizing. The EI values are all equal to the penalty.
 
-class WeldedBeamSO(SingleObjectiveProblem):
-    _bounds = [(0.125, 10.0), (0.1, 10.0), (0.1, 10.0), (0.1, 10.0)]
+class TensionCompression(SingleObjectiveProblem):
+    # _bounds = [(0.05, 2.0), (0.25, 1.3), (2.0, 15.0)] # bounds from original paper
+    _bounds = [(0.01, 1.0), (0.01, 1.0), (0.01, 20.0)] #botorch bounds
+    def get_number_of_constraints(self):
+        return 4
+
+    def get_penalty(self):
+        return 0.3
+
+    def get_name(self):
+        return "tension-compression-string"
+
+    def is_noisy(self):
+        return False
+
+    def is_expensive(self):
+        return False
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 3
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float)
+        self.bilog = Bilog()
+
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
+        x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
+        Bilog()
+        return (x1 ** 2) * x2 * (x3 + 2)
+
+    def evaluate_slack_true(self, X: Tensor) -> Tensor:
+        pass
+
+    def evaluate_slack1_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
+        x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
+        return self.bilog(1 - (x2 ** 3) * x3 / (71785 * (x1 ** 4)))[0]
+
+    def evaluate_slack2_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
+        x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
+        return self.bilog(torch.clip((4 * (x2 ** 2) - x1 * x2) / (12566 * (x1 ** 3) * (x2 - x1)) + 1 / (5108 * (x1 ** 2)) - 1, max=5000))[0]
+
+    def evaluate_slack3_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
+        x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
+        return self.bilog(1 - 140.45 * x1 / (x3 * (x2 ** 2)))[0]
+
+    def evaluate_slack4_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
+        x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
+        return self.bilog((x1 + x2) / 1.5 - 1)[0]
+
+    def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
+        y = self.forward(X).reshape(-1, 1)
+        c1 = self.evaluate_slack1_true(X).reshape(-1, 1)
+        c2 = self.evaluate_slack2_true(X).reshape(-1, 1)
+        c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
+        c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
+        return torch.concat([y, c1, c2, c3, c4], dim=1)
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert 0 <= task_index <= 4, "Task index must be between 0 and 4"
+        if task_index == 0:
+            return self.forward(X)
+        elif task_index == 1:
+            return self.evaluate_slack1_true(X)
+        elif task_index == 2:
+            return self.evaluate_slack2_true(X)
+        elif task_index == 3:
+            return self.evaluate_slack3_true(X)
+        elif task_index == 4:
+            return self.evaluate_slack4_true(X)
+        else:
+            raise ValueError("Invalid task index")
+
+
+class SpeedReducer(SingleObjectiveProblem):
+    _bounds = [(2.6, 3.6), (0.7, 0.8), (17.0, 28.0), (7.3, 8.3), (7.8, 8.3), (2.9, 3.9), (5.0, 5.5)]
 
     def get_number_of_constraints(self):
-        return 6
+        return 7
 
     def is_noisy(self):
         return False
 
     def get_penalty(self):
-        return 1221.0  # Maximum is around 1220.174
+        return 4500.0
+
+    def is_expensive(self):
+        return False
+
+    def get_name(self):
+        return "speed_reducer   "
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 7
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 0.7854 * x1 * (x2 ** 2) * (3.3333 * (x3 ** 2) + 14.9334 * x3 - 43.0934) - 1.508 * x1 * (
+                    x6 ** 2 + x7 ** 2) + 7.4777 * (x6 ** 3 + x7 ** 3) + 0.7854 * (x4 * (x6 ** 2) + x5 * (x7 ** 2))
+
+    def get_coordinates(self, X_tf):
+        return X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3], X_tf[..., 4], X_tf[..., 5], X_tf[..., 6]
+
+    def evaluate_slack_true(self, X: Tensor) -> Tensor:
+        pass
+
+    def evaluate_slack1_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 27.0 * (1 / x1) * (1 / (x2 ** 2)) * (1 / x3) - 1
+
+    def evaluate_slack2_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 397.5 * (1 / x1) * (1 / (x2 ** 2)) * (1 / (x3 ** 2)) - 1
+
+    def evaluate_slack3_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 1.93 * (1 / x2) * (1 / x3) * (x4 ** 3) * (1 / (x6 ** 4)) - 1
+
+    def evaluate_slack4_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 1.93 * (1 / x2) * (1 / x3) * (x5 ** 3) * (1 / (x7 ** 4)) - 1
+
+    def evaluate_slack5_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 1 / (0.1 * (x6 ** 3)) * torch.sqrt((745 * x4 / (x2 * x3)) ** 2 + 16.9 * 1e6) - 1100
+
+    def evaluate_slack6_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 1 / (0.1 * (x7 ** 3)) * torch.sqrt((745 * x5 / (x2 * x3)) ** 2 + 157.5 * 1e6) - 850
+
+    def evaluate_slack7_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return x2 * x3 - 40
+
+    def evaluate_slack8_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return 5 - x1 / x2
+
+    def evaluate_slack9_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return x1 / x2 - 12
+
+    def evaluate_slack10_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return (1.5 * x6 + 1.9) / x4 - 1
+
+    def evaluate_slack11_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
+        return (1.1 * x7 + 1.9) / x5 - 1
+
+    def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
+        y = self.forward(X).reshape(-1, 1)
+        c1 = self.evaluate_slack1_true(X).reshape(-1, 1)
+        c2 = self.evaluate_slack2_true(X).reshape(-1, 1)
+        c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
+        c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
+        c5 = self.evaluate_slack5_true(X).reshape(-1, 1)
+        c6 = self.evaluate_slack6_true(X).reshape(-1, 1)
+        c7 = self.evaluate_slack7_true(X).reshape(-1, 1)
+        c8 = self.evaluate_slack8_true(X).reshape(-1, 1)
+        c9 = self.evaluate_slack9_true(X).reshape(-1, 1)
+        c10 = self.evaluate_slack10_true(X).reshape(-1, 1)
+        c11 = self.evaluate_slack11_true(X).reshape(-1, 1)
+        return torch.concat([y, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11], dim=1)
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert 0 <= task_index <= 11, "Task index must be between 0 and 11"
+        if task_index == 0:
+            return self.forward(X)
+        elif task_index == 1:
+            return self.evaluate_slack1_true(X)
+        elif task_index == 2:
+            return self.evaluate_slack2_true(X)
+        elif task_index == 3:
+            return self.evaluate_slack3_true(X)
+        elif task_index == 4:
+            return self.evaluate_slack4_true(X)
+        elif task_index == 5:
+            return self.evaluate_slack5_true(X)
+        elif task_index == 6:
+            return self.evaluate_slack6_true(X)
+        elif task_index == 7:
+            return self.evaluate_slack7_true(X)
+        elif task_index == 8:
+            return self.evaluate_slack8_true(X)
+        elif task_index == 9:
+            return self.evaluate_slack9_true(X)
+        elif task_index == 10:
+            return self.evaluate_slack10_true(X)
+        elif task_index == 11:
+            return self.evaluate_slack11_true(X)
+        else:
+            raise ValueError("Invalid task index")
+
+
+class WeldedBeamSO(SingleObjectiveProblem):
+    _bounds = [(0.125, 10.0), (0.1, 10.0), (0.1, 10.0), (0.1, 10.0)]
+
+    def get_number_of_constraints(self):
+        return 5
+
+    def is_noisy(self):
+        return False
+
+    def get_penalty(self):
+        return 150.0  # Maximum is around 1220.174
 
     def is_expensive(self):
         return False
@@ -594,17 +808,12 @@ class WeldedBeamSO(SingleObjectiveProblem):
 
     def evaluate_slack4_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
-        x1, x2, x3, x4 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
-        return 0.10471 * x1.pow(2) + 0.04811 * x3 * x4 * (14.0 + x2) - 5.0
-
-    def evaluate_slack5_true(self, X: Tensor) -> Tensor:
-        X_tf = unnormalize(X, self._bounds)
         x3, x4 = X_tf[..., 2], X_tf[..., 3]
         P, L, E, d_max = 6000.0, 14.0, 30e6, 0.25
         d = 4 * P * L ** 3 / (E * x3.pow(3) * x4)
         return d - d_max
 
-    def evaluate_slack6_true(self, X: Tensor) -> Tensor:
+    def evaluate_slack5_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
         x3, x4 = X_tf[..., 2], X_tf[..., 3]
         P, L, E, G = 6000.0, 14.0, 30e6, 12e6
@@ -621,11 +830,10 @@ class WeldedBeamSO(SingleObjectiveProblem):
         c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
         c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
         c5 = self.evaluate_slack5_true(X).reshape(-1, 1)
-        c6 = self.evaluate_slack6_true(X).reshape(-1, 1)
-        return torch.concat([y, c1, c2, c3, c4, c5, c6], dim=1)
+        return torch.concat([y, c1, c2, c3, c4, c5], dim=1)
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
-        assert 0 <= task_index <= 6, "Task index must be between 0 and 6"
+        assert 0 <= task_index <= 5, "Task index must be between 0 and 6"
         if task_index == 0:
             return self.forward(X)
         elif task_index == 1:
@@ -638,8 +846,6 @@ class WeldedBeamSO(SingleObjectiveProblem):
             return self.evaluate_slack4_true(X)
         elif task_index == 5:
             return self.evaluate_slack5_true(X)
-        elif task_index == 6:
-            return self.evaluate_slack6_true(X)
         else:
             raise ValueError("Invalid task index")
 

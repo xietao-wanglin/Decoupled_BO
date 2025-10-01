@@ -12,8 +12,8 @@ from bo.bo_loops.bayesian_optimization_loop_type import BayesianOptimizationLoop
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper, obj_callable, constraint_callable_wrapper
 from bo.synthetic_test_functions.cnn_takena22_benchmark import const_cnn_cifar10
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
-    MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem
-
+    MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem, \
+    TensionCompression, SpeedReducer
 device = torch.device("cpu")
 dtype = torch.double
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -181,9 +181,12 @@ if __name__ == '__main__':
                                                          "Branin",
                                                          "TestFunc3",
                                                          "WeldedBeam",
+                                                         "TensionCompression",
                                                          "PressureVessel",
+                                                         "SpeedReducer",
                                                          "two_layer_cnn",
-                                                         "two_layer_cnn_discrete"], required=True,
+                                                         "two_layer_cnn_discrete"],
+                        required=True,
                         help="Choose the function")
 
     parser.add_argument(
@@ -221,11 +224,20 @@ if __name__ == '__main__':
     elif args.function == "WeldedBeam":
         black_box_function = WeldedBeamSO(noise_std=1e-6,
                                           negate=True)
-        number_initial_designs = 36
+        number_initial_designs = 6
+    elif args.function == "TensionCompression":
+        black_box_function = TensionCompression(noise_std=1e-6,
+                                                negate=True)
+        number_initial_designs = 6
     elif args.function == "PressureVessel":
         black_box_function = PressureVessel(noise_std=1e-6,
                                             negate=True)
-        number_initial_designs = 36
+        number_initial_designs = 6
+
+    elif args.function == "SpeedReducer":
+        black_box_function = SpeedReducer(noise_std=1e-6,
+                                            negate=True)
+        number_initial_designs = 6
     elif args.function == "two_layer_cnn":
         black_box_function = TwoLayerCNN_train(negate=False)
         number_initial_designs = 30
