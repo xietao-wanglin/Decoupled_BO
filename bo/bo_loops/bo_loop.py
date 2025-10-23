@@ -302,7 +302,7 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                 f"\nBatch{iteration:>2} finished: best value (EI) = "
                 f"({best_observed_value:>4.5f}), best location " + str(
                     best_observed_location.numpy()) + " current sample decision x: " + str(
-                    location_to_sample.numpy()) + f" on tasks " + str(index) + "\n",
+                    location_to_sample.numpy()) + " on tasks " + str(index) + "\n",
                 end="", )
 
             self.save_parameters(train_x=train_x,

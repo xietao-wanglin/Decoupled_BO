@@ -13,7 +13,7 @@ from bo.model.Model import ConstrainedDeoupledGPModelWrapper, obj_callable, cons
 from bo.synthetic_test_functions.cnn_takena22_benchmark import const_cnn_cifar10
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
     MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem, \
-    TensionCompression, SpeedReducer
+    TensionCompression, SpeedReducer, BraninHoo
 device = torch.device("cpu")
 dtype = torch.double
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -119,15 +119,15 @@ def get_bo_algorithms(decoupled: bool):
     """Returns the appropriate Bayesian Optimization algorithms based on acquisition function type."""
     if decoupled:
         return [
-            BayesianOptimizationLoopType.DCKG_CKG,
-            BayesianOptimizationLoopType.DCKG,
-            BayesianOptimizationLoopType.EIKG,
-            BayesianOptimizationLoopType.DEI,
+            #BayesianOptimizationLoopType.DCKG_CKG,
+            #BayesianOptimizationLoopType.DCKG,
+            #BayesianOptimizationLoopType.EIKG,
+            #BayesianOptimizationLoopType.DEI,
             BayesianOptimizationLoopType.OPTIMISTIC_UCB
         ]
     return [
         BayesianOptimizationLoopType.CEI,
-        BayesianOptimizationLoopType.CKG,
+        #BayesianOptimizationLoopType.CKG,
     ]
 
 
@@ -181,6 +181,7 @@ if __name__ == '__main__':
                                                          "Branin",
                                                          "TestFunc3",
                                                          "WeldedBeam",
+                                                         "BraninHoo",
                                                          "TensionCompression",
                                                          "PressureVessel",
                                                          "SpeedReducer",
@@ -221,6 +222,8 @@ if __name__ == '__main__':
         black_box_function = ConstrainedBraninNew(noise_std=1e-6,
                                                   negate=True)
         number_initial_designs = 6
+    elif args.function == "BraninHoo":
+        black_box_function = BraninHoo(noise_std=1e-6, negate=False)
     elif args.function == "WeldedBeam":
         black_box_function = WeldedBeamSO(noise_std=1e-6,
                                           negate=True)
@@ -248,7 +251,7 @@ if __name__ == '__main__':
         raise ValueError(f"Function {args.function} is not supported.")
 
     # Parameters
-    budgets = [150]
+    budgets = [160]
     costs = [None]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)
