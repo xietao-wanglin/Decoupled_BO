@@ -454,13 +454,25 @@ class ConstrainedFunc3(SingleObjectiveProblem):
 class BraninHoo(SingleObjectiveProblem):
     _bounds = [(-5.0, 10.0), (0.0, 15.0)]
 
+    def get_number_of_constraints(self):
+        return 1
+    
+    def get_penalty(self):
+        return 1
+    
+    def get_name(self):
+        return "braninhoo"
+    
+    def is_noisy(self):
+        return False
+
+    def is_expensive(self):
+        return False
+
     def __init__(self, noise_std=0.0, negate=False):
         self.dim = 2
         super().__init__(noise_std=noise_std, negate=negate)
         self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
-
-    def is_expensive(self):
-        return False
     
     def func(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
