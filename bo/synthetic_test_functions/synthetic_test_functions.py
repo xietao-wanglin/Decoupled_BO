@@ -487,7 +487,7 @@ class BraninHoo(SingleObjectiveProblem):
         return a*(X_2 - b*X_1*X_1 + c*X_1 - r)**2 + s*(1-t)*torch.cos(X_1) + s
 
     def evaluate_true(self, X: Tensor) -> Tensor:
-        return -self.func(X)
+        return self.func(X)
 
     def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
         y = self.forward(X).reshape(-1, 1)
@@ -496,7 +496,7 @@ class BraninHoo(SingleObjectiveProblem):
         return torch.concat([y, c1], dim=1)
 
     def evaluate_slack_true(self, X: Tensor) -> Tensor:
-        slack = -self.func(X) - 0.6 
+        slack = -self.func(X) + 0.6 
         return slack
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
@@ -510,8 +510,6 @@ class BraninHoo(SingleObjectiveProblem):
             print("Error evaluate_task")
             raise
 
-    def is_noisy(self):
-        return False
 
 class PressureVessel(SingleObjectiveProblem):
     _bounds = [(0.0, 10.0), (0.0, 10.0), (10.0, 50.0), (150.0, 200.0)]
