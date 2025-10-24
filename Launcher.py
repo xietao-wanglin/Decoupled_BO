@@ -252,7 +252,7 @@ if __name__ == '__main__':
         raise ValueError(f"Function {args.function} is not supported.")
 
     # Parameters
-    budgets = [40]
+    budgets = [160]
     costs = [None]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)
