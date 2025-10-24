@@ -13,7 +13,7 @@ from bo.model.Model import ConstrainedDeoupledGPModelWrapper, obj_callable, cons
 from bo.synthetic_test_functions.cnn_takena22_benchmark import const_cnn_cifar10
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
     MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem, \
-    TensionCompression, SpeedReducer, BraninHoo
+    TensionCompression, SpeedReducer, BraninHoo, BraninHoo2, BraninHoo3
 device = torch.device("cpu")
 dtype = torch.double
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -182,6 +182,8 @@ if __name__ == '__main__':
                                                          "TestFunc3",
                                                          "WeldedBeam",
                                                          "BraninHoo",
+                                                         "BraninHoo2",
+                                                         "BraninHoo3",
                                                          "TensionCompression",
                                                          "PressureVessel",
                                                          "SpeedReducer",
@@ -224,7 +226,13 @@ if __name__ == '__main__':
         number_initial_designs = 6
     elif args.function == "BraninHoo":
         black_box_function = BraninHoo(noise_std=1e-2, negate=True)
-        number_initial_designs = 6
+        number_initial_designs = 3
+    elif args.function == "BraninHoo2":
+        black_box_function = BraninHoo2(noise_std=1e-2, negate=True)
+        number_initial_designs = 5
+    elif args.function == "BraninHoo3":
+        black_box_function = BraninHoo3(noise_std=1e-2, negate=True)
+        number_initial_designs = 5
     elif args.function == "WeldedBeam":
         black_box_function = WeldedBeamSO(noise_std=1e-6,
                                           negate=True)

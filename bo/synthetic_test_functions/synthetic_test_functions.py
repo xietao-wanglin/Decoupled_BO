@@ -464,7 +464,7 @@ class BraninHoo(SingleObjectiveProblem):
         return "braninhoo"
     
     def is_noisy(self):
-        return False
+        return True
 
     def is_expensive(self):
         return False
@@ -488,7 +488,6 @@ class BraninHoo(SingleObjectiveProblem):
     def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
         y = self.forward(X).reshape(-1, 1)
         c1 = self.evaluate_slack_true(X).reshape(-1, 1)
-        print(y.shape, c1.shape)
         return torch.concat([y, c1], dim=1)
 
     def evaluate_slack_true(self, X: Tensor) -> Tensor:
@@ -502,6 +501,180 @@ class BraninHoo(SingleObjectiveProblem):
             return self.forward(X)
         elif task_index == 1:
             return self.evaluate_slack(X)
+        else:
+            print("Error evaluate_task")
+            raise
+
+class BraninHoo2(SingleObjectiveProblem):
+    _bounds = [(0.0, 1.0), (0.0, 1.0)]
+
+    def get_number_of_constraints(self):
+        return 2
+    
+    def get_penalty(self):
+        return 1
+    
+    def get_name(self):
+        return "braninhoo2"
+    
+    def is_noisy(self):
+        return True
+
+    def is_expensive(self):
+        return False
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 2
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def goldstein(self, X):
+        X_tf = unnormalize(X, self._bounds)
+        X_1 = X_tf[..., 0]
+        X_2 = X_tf[..., 1]
+        x = 4*X_1
+        y = 4*X_2 - 2
+        c = 1/2.427
+        log = (1 + ((x + y + 1)**2)*(19-14*x+3*x*x-14*y+6*x*y + 3*y*y))*(30 + ((2*x - 3*y)**2)*(18-32*x+12*x*x+48*y-36*x*y+27*y*y))
+        shift = 8.693
+        return c*(torch.log(log) - shift)
+    
+    def func(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        X_1 = X_tf[..., 0]
+        X_2 = X_tf[..., 1]
+        x = 15*X_1 - 5
+        y = 15*X_2
+        return (1/51.95)*((y-5.1*x*x/(4*(torch.pi**2)) + 5*x/torch.pi-6)**2 + (10 - 10/(8*torch.pi))*torch.cos(x)-44.81)
+
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        return self.func(X)
+
+    def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
+        y = self.forward(X).reshape(-1, 1)
+        c1 = self.evaluate_slack1(X).reshape(-1, 1)
+        c2 = self.evaluate_slack2(X).reshape(-1, 1)
+        return torch.concat([y, c1, c2], dim=1)
+    
+    def evaluate_slack_true(self, X):
+        pass
+    
+    def evaluate_slack1(self, X, noise = True):
+        cons = self.func(X) + 0.5
+        if noise and self.constraint_noise_std is not None:
+            _constraint_noise = torch.tensor(
+                self.constraint_noise_std, device=X.device, dtype=X.dtype
+            )
+            cons += _constraint_noise * torch.randn_like(cons)
+        
+        return cons
+    
+    def evaluate_slack2(self, X, noise = True):
+        cons = self.goldstein(X) + 0.7
+        if noise and self.constraint_noise_std is not None:
+            _constraint_noise = torch.tensor(
+                self.constraint_noise_std, device=X.device, dtype=X.dtype
+            )
+            cons += _constraint_noise * torch.randn_like(cons)
+        
+        return cons
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert task_index <= 2, "Maximum of 2 Outputs allowed (task_index <= 1)"
+        assert task_index >= 0, "No negative values for task_index allowed"
+        if task_index == 0:
+            return self.forward(X)
+        elif task_index == 1:
+            return self.evaluate_slack1(X)
+        elif task_index == 2:
+            return self.evaluate_slack2(X)
+        else:
+            print("Error evaluate_task")
+            raise
+
+class BraninHoo3(SingleObjectiveProblem):
+    _bounds = [(0.0, 1.0), (0.0, 1.0)]
+
+    def get_number_of_constraints(self):
+        return 2
+    
+    def get_penalty(self):
+        return 1
+    
+    def get_name(self):
+        return "braninhoo3"
+    
+    def is_noisy(self):
+        return True
+
+    def is_expensive(self):
+        return False
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 2
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+
+    def goldstein(self, X):
+        X_tf = unnormalize(X, self._bounds)
+        X_1 = X_tf[..., 0]
+        X_2 = X_tf[..., 1]
+        x = 4*X_1
+        y = 4*X_2 - 2
+        c = 1/2.427
+        log = (1 + ((x + y + 1)**2)*(19-14*x+3*x*x-14*y+6*x*y + 3*y*y))*(30 + ((2*x - 3*y)**2)*(18-32*x+12*x*x+48*y-36*x*y+27*y*y))
+        shift = 8.693
+        return c*(torch.log(log) - shift)
+    
+    def func(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        X_1 = X_tf[..., 0]
+        X_2 = X_tf[..., 1]
+        x = 15*X_1 - 5
+        y = 15*X_2
+        return (1/51.95)*((y-5.1*x*x/(4*(torch.pi**2)) + 5*x/torch.pi-6)**2 + (10 - 10/(8*torch.pi))*torch.cos(x)-44.81)
+
+    def evaluate_true(self, X: Tensor) -> Tensor:
+        return self.func(X)
+
+    def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
+        y = self.forward(X).reshape(-1, 1)
+        c1 = self.evaluate_slack1(X).reshape(-1, 1)
+        c2 = self.evaluate_slack2(X).reshape(-1, 1)
+        return torch.concat([y, c1, c2], dim=1)
+    
+    def evaluate_slack_true(self, X):
+        pass
+    
+    def evaluate_slack1(self, X, noise = True):
+        cons = -self.func(X) - 0.6
+        if noise and self.constraint_noise_std is not None:
+            _constraint_noise = torch.tensor(
+                self.constraint_noise_std, device=X.device, dtype=X.dtype
+            )
+            cons += _constraint_noise * torch.randn_like(cons)
+        
+        return cons
+    
+    def evaluate_slack2(self, X, noise = True):
+        cons = self.goldstein(X) + 0.7
+        if noise and self.constraint_noise_std is not None:
+            _constraint_noise = torch.tensor(
+                self.constraint_noise_std, device=X.device, dtype=X.dtype
+            )
+            cons += _constraint_noise * torch.randn_like(cons)
+        
+        return cons
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert task_index <= 2, "Maximum of 2 Outputs allowed (task_index <= 1)"
+        assert task_index >= 0, "No negative values for task_index allowed"
+        if task_index == 0:
+            return self.forward(X)
+        elif task_index == 1:
+            return self.evaluate_slack1(X)
+        elif task_index == 2:
+            return self.evaluate_slack2(X)
         else:
             print("Error evaluate_task")
             raise
