@@ -22,6 +22,7 @@ from bo.samplers.samplers import quantileSampler, constantSampler, objectiveQuan
     RepeatedInterleavedSobolQMCNormalSampler
 from debug_utils.utils import record_io
 
+dtype = torch.double
 
 class AcquisitionFunctionType(Enum):
     OPTIMISTIC_UCB = auto()

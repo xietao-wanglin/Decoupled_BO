@@ -223,7 +223,7 @@ if __name__ == '__main__':
                                                   negate=True)
         number_initial_designs = 6
     elif args.function == "BraninHoo":
-        black_box_function = BraninHoo(noise_std=1e-6, negate=False)
+        black_box_function = BraninHoo(noise_std=1e-6, negate=True)
         number_initial_designs = 6
     elif args.function == "WeldedBeam":
         black_box_function = WeldedBeamSO(noise_std=1e-6,
@@ -252,7 +252,7 @@ if __name__ == '__main__':
         raise ValueError(f"Function {args.function} is not supported.")
 
     # Parameters
-    budgets = [160]
+    budgets = [40]
     costs = [None]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)

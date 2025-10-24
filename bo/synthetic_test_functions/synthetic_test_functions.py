@@ -92,7 +92,7 @@ class MOPTA08(ConstrainedBaseTestProblem):
 
     def evaluate_black_box(self, X: Tensor) -> Tensor:
         y = self.evaluate_true(X).reshape(-1, 1)
-        c1 = self.evaluate_slack_true(X).reshape(-1, 1)  #
+        c1 = self.evaluate_slack_true(X).reshape(-1, 1)
         return torch.concat([y, c1], dim=1)
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
@@ -452,7 +452,7 @@ class ConstrainedFunc3(SingleObjectiveProblem):
             raise
 
 class BraninHoo(SingleObjectiveProblem):
-    _bounds = [(-5.0, 10.0), (0.0, 15.0)]
+    _bounds = [(0.0, 1.0), (0.0, 1.0)]
 
     def get_number_of_constraints(self):
         return 1
@@ -478,13 +478,9 @@ class BraninHoo(SingleObjectiveProblem):
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
-        a = 1
-        b = 5.1/(4*torch.pi**2)
-        c = 5 / torch.pi
-        r = 6
-        s = 10
-        t = 1 / (8*torch.pi)
-        return a*(X_2 - b*X_1*X_1 + c*X_1 - r)**2 + s*(1-t)*torch.cos(X_1) + s
+        x = 15*X_1 - 5
+        y = 15*X_2
+        return (1/51.95)*((y-5.1*x*x/(4*(torch.pi**2)) + 5*x/torch.pi-6)**2 + (10 - 10/(8*torch.pi))*torch.cos(x)-44.81)
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         return self.func(X)
@@ -496,7 +492,7 @@ class BraninHoo(SingleObjectiveProblem):
         return torch.concat([y, c1], dim=1)
 
     def evaluate_slack_true(self, X: Tensor) -> Tensor:
-        slack = -self.func(X) + 0.6 
+        slack = self.func(X) + 0.6
         return slack
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
