@@ -501,7 +501,7 @@ class BraninHoo(SingleObjectiveProblem):
         if task_index == 0:
             return self.forward(X)
         elif task_index == 1:
-            return self.evaluate_slack_true(X)
+            return self.evaluate_slack(X)
         else:
             print("Error evaluate_task")
             raise

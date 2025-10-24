@@ -223,7 +223,7 @@ if __name__ == '__main__':
                                                   negate=True)
         number_initial_designs = 6
     elif args.function == "BraninHoo":
-        black_box_function = BraninHoo(noise_std=1e-6, negate=True)
+        black_box_function = BraninHoo(noise_std=1e-2, negate=True)
         number_initial_designs = 6
     elif args.function == "WeldedBeam":
         black_box_function = WeldedBeamSO(noise_std=1e-6,
