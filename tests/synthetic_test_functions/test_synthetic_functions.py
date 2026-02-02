@@ -131,8 +131,8 @@ class TestDecoupledKG(BotorchTestCase):
         self.assertEqual(actual_full_vector.shape[1], 5)
 
     def test_tension_compression(self):
-        expected_best_fval = -0.012681
-        best_recommended_point = torch.tensor([0.051989, 0.363965, 10.890522])
+        expected_best_fval = -0.012666
+        best_recommended_point = torch.tensor([0.05174250340926, 0.35800478345599, 11.21390736278739])
         bounds = torch.tensor([[0.01, 0.01, 0.01], [1.0, 1.0, 20.0]])
         normalized_best_recommended_point = normalize(best_recommended_point, bounds=bounds)
         function = TensionCompression(negate=True)

@@ -982,6 +982,12 @@ class SpeedReducer(SingleObjectiveProblem):
 class WeldedBeamSO(SingleObjectiveProblem):
     _bounds = [(0.125, 10.0), (0.1, 10.0), (0.1, 10.0), (0.1, 10.0)]
 
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 4
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+        self.transformation = Bilog()
+
     def get_number_of_constraints(self):
         return 5
 
@@ -989,18 +995,13 @@ class WeldedBeamSO(SingleObjectiveProblem):
         return False
 
     def get_penalty(self):
-        return 150.0  # Maximum is around 1220.174
+        return 1220.0  # Maximum is around 1220.174
 
     def is_expensive(self):
         return False
 
     def get_name(self):
         return "welded_beam"
-
-    def __init__(self, noise_std=0.0, negate=False):
-        self.dim = 4
-        super().__init__(noise_std=noise_std, negate=negate)
-        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
@@ -1058,24 +1059,37 @@ class WeldedBeamSO(SingleObjectiveProblem):
         c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
         c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
         c5 = self.evaluate_slack5_true(X).reshape(-1, 1)
-        return torch.concat([y, c1, c2, c3, c4, c5], dim=1)
+        out = torch.concat([y, c1, c2, c3, c4, c5], dim=1)
+        out_transformed = out.clone()
+        out_transformed[..., 1:] = self.transform_(out[..., 1:])
+        return out_transformed
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
         assert 0 <= task_index <= 5, "Task index must be between 0 and 6"
         if task_index == 0:
             return self.forward(X)
         elif task_index == 1:
-            return self.evaluate_slack1_true(X)
+            constraint_1_raw = self.evaluate_slack1_true(X)
+            return self.transform_(constraint_1_raw)
         elif task_index == 2:
-            return self.evaluate_slack2_true(X)
+            constraint_2_raw = self.evaluate_slack2_true(X)
+            return self.transform_(constraint_2_raw)
         elif task_index == 3:
-            return self.evaluate_slack3_true(X)
+            constraint_3_raw = self.evaluate_slack3_true(X)
+            return self.transform_(constraint_3_raw)
         elif task_index == 4:
-            return self.evaluate_slack4_true(X)
+            constraint_4_raw = self.evaluate_slack4_true(X)
+            return self.transform_(constraint_4_raw)
         elif task_index == 5:
-            return self.evaluate_slack5_true(X)
+            constraint_5_raw = self.evaluate_slack5_true(X)
+            return self.transform_(constraint_5_raw)
         else:
             raise ValueError("Invalid task index")
+
+    def transform_(self, raw_values):
+        logits = self.transformation(torch.atleast_1d(raw_values))
+        logits = logits[0].view(raw_values.shape)
+        return logits
 
 
 class TwoLayerCNN_train(SingleObjectiveProblem):
