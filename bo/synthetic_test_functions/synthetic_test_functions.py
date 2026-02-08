@@ -451,18 +451,19 @@ class ConstrainedFunc3(SingleObjectiveProblem):
             print("Error evaluate_task")
             raise
 
+
 class BraninHoo(SingleObjectiveProblem):
     _bounds = [(0.0, 1.0), (0.0, 1.0)]
 
     def get_number_of_constraints(self):
         return 1
-    
+
     def get_penalty(self):
         return 1
-    
+
     def get_name(self):
         return "braninhoo"
-    
+
     def is_noisy(self):
         return True
 
@@ -473,14 +474,15 @@ class BraninHoo(SingleObjectiveProblem):
         self.dim = 2
         super().__init__(noise_std=noise_std, negate=negate)
         self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
-    
+
     def func(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
-        x = 15*X_1 - 5
-        y = 15*X_2
-        return (1/51.95)*((y-5.1*x*x/(4*(torch.pi**2)) + 5*x/torch.pi-6)**2 + (10 - 10/(8*torch.pi))*torch.cos(x)-44.81)
+        x = 15 * X_1 - 5
+        y = 15 * X_2
+        return (1 / 51.95) * ((y - 5.1 * x * x / (4 * (torch.pi ** 2)) + 5 * x / torch.pi - 6) ** 2 + (
+                    10 - 10 / (8 * torch.pi)) * torch.cos(x) - 44.81)
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         return self.func(X)
@@ -510,13 +512,13 @@ class BraninHoo2(SingleObjectiveProblem):
 
     def get_number_of_constraints(self):
         return 2
-    
+
     def get_penalty(self):
         return 1
-    
+
     def get_name(self):
         return "braninhoo2"
-    
+
     def is_noisy(self):
         return True
 
@@ -532,20 +534,22 @@ class BraninHoo2(SingleObjectiveProblem):
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
-        x = 4*X_1
-        y = 4*X_2 - 2
-        c = 1/2.427
-        log = (1 + ((x + y + 1)**2)*(19-14*x+3*x*x-14*y+6*x*y + 3*y*y))*(30 + ((2*x - 3*y)**2)*(18-32*x+12*x*x+48*y-36*x*y+27*y*y))
+        x = 4 * X_1
+        y = 4 * X_2 - 2
+        c = 1 / 2.427
+        log = (1 + ((x + y + 1) ** 2) * (19 - 14 * x + 3 * x * x - 14 * y + 6 * x * y + 3 * y * y)) * (
+                    30 + ((2 * x - 3 * y) ** 2) * (18 - 32 * x + 12 * x * x + 48 * y - 36 * x * y + 27 * y * y))
         shift = 8.693
-        return c*(torch.log(log) - shift)
-    
+        return c * (torch.log(log) - shift)
+
     def func(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
-        x = 15*X_1 - 5
-        y = 15*X_2
-        return (1/51.95)*((y-5.1*x*x/(4*(torch.pi**2)) + 5*x/torch.pi-6)**2 + (10 - 10/(8*torch.pi))*torch.cos(x)-44.81)
+        x = 15 * X_1 - 5
+        y = 15 * X_2
+        return (1 / 51.95) * ((y - 5.1 * x * x / (4 * (torch.pi ** 2)) + 5 * x / torch.pi - 6) ** 2 + (
+                    10 - 10 / (8 * torch.pi)) * torch.cos(x) - 44.81)
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         return self.func(X)
@@ -555,28 +559,28 @@ class BraninHoo2(SingleObjectiveProblem):
         c1 = self.evaluate_slack1(X).reshape(-1, 1)
         c2 = self.evaluate_slack2(X).reshape(-1, 1)
         return torch.concat([y, c1, c2], dim=1)
-    
+
     def evaluate_slack_true(self, X):
         pass
-    
-    def evaluate_slack1(self, X, noise = True):
+
+    def evaluate_slack1(self, X, noise=True):
         cons = self.func(X) + 0.5
         if noise and self.constraint_noise_std is not None:
             _constraint_noise = torch.tensor(
                 self.constraint_noise_std, device=X.device, dtype=X.dtype
             )
             cons += _constraint_noise * torch.randn_like(cons)
-        
+
         return cons
-    
-    def evaluate_slack2(self, X, noise = True):
+
+    def evaluate_slack2(self, X, noise=True):
         cons = self.goldstein(X) + 0.7
         if noise and self.constraint_noise_std is not None:
             _constraint_noise = torch.tensor(
                 self.constraint_noise_std, device=X.device, dtype=X.dtype
             )
             cons += _constraint_noise * torch.randn_like(cons)
-        
+
         return cons
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
@@ -592,18 +596,19 @@ class BraninHoo2(SingleObjectiveProblem):
             print("Error evaluate_task")
             raise
 
+
 class BraninHoo3(SingleObjectiveProblem):
     _bounds = [(0.0, 1.0), (0.0, 1.0)]
 
     def get_number_of_constraints(self):
         return 2
-    
+
     def get_penalty(self):
         return 1
-    
+
     def get_name(self):
         return "braninhoo3"
-    
+
     def is_noisy(self):
         return True
 
@@ -619,20 +624,22 @@ class BraninHoo3(SingleObjectiveProblem):
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
-        x = 4*X_1
-        y = 4*X_2 - 2
-        c = 1/2.427
-        log = (1 + ((x + y + 1)**2)*(19-14*x+3*x*x-14*y+6*x*y + 3*y*y))*(30 + ((2*x - 3*y)**2)*(18-32*x+12*x*x+48*y-36*x*y+27*y*y))
+        x = 4 * X_1
+        y = 4 * X_2 - 2
+        c = 1 / 2.427
+        log = (1 + ((x + y + 1) ** 2) * (19 - 14 * x + 3 * x * x - 14 * y + 6 * x * y + 3 * y * y)) * (
+                    30 + ((2 * x - 3 * y) ** 2) * (18 - 32 * x + 12 * x * x + 48 * y - 36 * x * y + 27 * y * y))
         shift = 8.693
-        return c*(torch.log(log) - shift)
-    
+        return c * (torch.log(log) - shift)
+
     def func(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
         X_1 = X_tf[..., 0]
         X_2 = X_tf[..., 1]
-        x = 15*X_1 - 5
-        y = 15*X_2
-        return (1/51.95)*((y-5.1*x*x/(4*(torch.pi**2)) + 5*x/torch.pi-6)**2 + (10 - 10/(8*torch.pi))*torch.cos(x)-44.81)
+        x = 15 * X_1 - 5
+        y = 15 * X_2
+        return (1 / 51.95) * ((y - 5.1 * x * x / (4 * (torch.pi ** 2)) + 5 * x / torch.pi - 6) ** 2 + (
+                    10 - 10 / (8 * torch.pi)) * torch.cos(x) - 44.81)
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         return self.func(X)
@@ -642,28 +649,28 @@ class BraninHoo3(SingleObjectiveProblem):
         c1 = self.evaluate_slack1(X).reshape(-1, 1)
         c2 = self.evaluate_slack2(X).reshape(-1, 1)
         return torch.concat([y, c1, c2], dim=1)
-    
+
     def evaluate_slack_true(self, X):
         pass
-    
-    def evaluate_slack1(self, X, noise = True):
+
+    def evaluate_slack1(self, X, noise=True):
         cons = -self.func(X) - 0.6
         if noise and self.constraint_noise_std is not None:
             _constraint_noise = torch.tensor(
                 self.constraint_noise_std, device=X.device, dtype=X.dtype
             )
             cons += _constraint_noise * torch.randn_like(cons)
-        
+
         return cons
-    
-    def evaluate_slack2(self, X, noise = True):
+
+    def evaluate_slack2(self, X, noise=True):
         cons = self.goldstein(X) + 0.7
         if noise and self.constraint_noise_std is not None:
             _constraint_noise = torch.tensor(
                 self.constraint_noise_std, device=X.device, dtype=X.dtype
             )
             cons += _constraint_noise * torch.randn_like(cons)
-        
+
         return cons
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
@@ -683,6 +690,12 @@ class BraninHoo3(SingleObjectiveProblem):
 class PressureVessel(SingleObjectiveProblem):
     _bounds = [(0.0, 10.0), (0.0, 10.0), (10.0, 50.0), (150.0, 200.0)]
 
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 4
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float)
+        self.transformation = Bilog()
+
     def get_number_of_constraints(self):
         return 4
 
@@ -697,11 +710,6 @@ class PressureVessel(SingleObjectiveProblem):
 
     def is_expensive(self):
         return False
-
-    def __init__(self, noise_std=0.0, negate=False):
-        self.dim = 4
-        super().__init__(noise_std=noise_std, negate=negate)
-        self._bounds = torch.tensor(self._bounds, dtype=torch.float)
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
@@ -739,42 +747,56 @@ class PressureVessel(SingleObjectiveProblem):
         return x4 - 240.0
 
     def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
-        print(X)
         y = self.forward(X).reshape(-1, 1)
-        print(y)
         c1 = self.evaluate_slack1_true(X).reshape(-1, 1)
-        print(c1)
         c2 = self.evaluate_slack2_true(X).reshape(-1, 1)
         c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
         c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
-        print(torch.concat([y, c1, c2, c3, c4], dim=1))
-        return torch.concat([y, c1, c2, c3, c4], dim=1)
+        out = torch.concat([y, c1, c2, c3, c4], dim=1)
+        out_transformed = out.clone()
+        out_transformed[..., 1:] = self.transform_(out[..., 1:])
+        return out_transformed
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
         assert 0 <= task_index <= 4, "Task index must be between 0 and 4"
         if task_index == 0:
             return self.forward(X)
         elif task_index == 1:
-            return self.evaluate_slack1_true(X)
+            constraint_1_raw = self.evaluate_slack1_true(X)
+            return self.transform_(constraint_1_raw)
         elif task_index == 2:
-            return self.evaluate_slack2_true(X)
+            constraint_2_raw = self.evaluate_slack2_true(X)
+            return self.transform_(constraint_2_raw)
         elif task_index == 3:
-            return self.evaluate_slack3_true(X)
+            constraint_3_raw = self.evaluate_slack3_true(X)
+            return self.transform_(constraint_3_raw)
         elif task_index == 4:
-            return self.evaluate_slack4_true(X)
+            constraint_4_raw = self.evaluate_slack4_true(X)
+            return self.transform_(constraint_4_raw)
         else:
             raise ValueError("Invalid task index")
 
-# TODO: TensionCompresion is not working as it should. Not really optimizing. The EI values are all equal to the penalty.
+    def transform_(self, raw_values):
+        logits = self.transformation(torch.atleast_1d(raw_values))
+        logits = logits[0].view(raw_values.shape)
+        return logits
+
 
 class TensionCompression(SingleObjectiveProblem):
-    # _bounds = [(0.05, 2.0), (0.25, 1.3), (2.0, 15.0)] # bounds from original paper
-    _bounds = [(0.01, 1.0), (0.01, 1.0), (0.01, 20.0)] #botorch bounds
+    _bounds = [(0.05, 2.0), (0.25, 1.3), (2.0, 15.0)]  # bounds from original paper
+
+    # _bounds = [(0.01, 1.0), (0.01, 1.0), (0.01, 20.0)] #botorch bounds
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 3
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float)
+        self.transformation = Bilog()
+
     def get_number_of_constraints(self):
         return 4
 
     def get_penalty(self):
-        return 0.3
+        return 3.0
 
     def get_name(self):
         return "tension-compression-string"
@@ -785,16 +807,9 @@ class TensionCompression(SingleObjectiveProblem):
     def is_expensive(self):
         return False
 
-    def __init__(self, noise_std=0.0, negate=False):
-        self.dim = 3
-        super().__init__(noise_std=noise_std, negate=negate)
-        self._bounds = torch.tensor(self._bounds, dtype=torch.float)
-        self.bilog = Bilog()
-
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
-        Bilog()
         return (x1 ** 2) * x2 * (x3 + 2)
 
     def evaluate_slack_true(self, X: Tensor) -> Tensor:
@@ -803,22 +818,22 @@ class TensionCompression(SingleObjectiveProblem):
     def evaluate_slack1_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
-        return self.bilog(1 - (x2 ** 3) * x3 / (71785 * (x1 ** 4)))[0]
+        return 1 - (x2 ** 3) * x3 / (71785 * (x1 ** 4))
 
     def evaluate_slack2_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
-        return self.bilog(torch.clip((4 * (x2 ** 2) - x1 * x2) / (12566 * (x1 ** 3) * (x2 - x1)) + 1 / (5108 * (x1 ** 2)) - 1, max=5000))[0]
+        return (4 * (x2 ** 2) - x1 * x2) / (12566 * (x1 ** 3) * (x2 - x1)) + 1 / (5108 * (x1 ** 2)) - 1
 
     def evaluate_slack3_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
-        return self.bilog(1 - 140.45 * x1 / (x3 * (x2 ** 2)))[0]
+        return 1 - (140.45 * x1 / (x3 * (x2 ** 2)))
 
     def evaluate_slack4_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
-        return self.bilog((x1 + x2) / 1.5 - 1)[0]
+        return ((x1 + x2) / 1.5) - 1
 
     def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
         y = self.forward(X).reshape(-1, 1)
@@ -826,26 +841,44 @@ class TensionCompression(SingleObjectiveProblem):
         c2 = self.evaluate_slack2_true(X).reshape(-1, 1)
         c3 = self.evaluate_slack3_true(X).reshape(-1, 1)
         c4 = self.evaluate_slack4_true(X).reshape(-1, 1)
-        return torch.concat([y, c1, c2, c3, c4], dim=1)
+        out = torch.concat([y, c1, c2, c3, c4], dim=1)
+        out_transformed = out.clone()
+        out_transformed[..., 1:] = self.transform_(out[..., 1:])
+        return out_transformed
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
         assert 0 <= task_index <= 4, "Task index must be between 0 and 4"
         if task_index == 0:
             return self.forward(X)
         elif task_index == 1:
-            return self.evaluate_slack1_true(X)
+            constraint_1_raw = self.evaluate_slack1_true(X)
+            return self.transform_(constraint_1_raw)
         elif task_index == 2:
-            return self.evaluate_slack2_true(X)
+            constraint_2_raw = self.evaluate_slack2_true(X)
+            return self.transform_(constraint_2_raw)
         elif task_index == 3:
-            return self.evaluate_slack3_true(X)
+            constraint_3_raw = self.evaluate_slack3_true(X)
+            return self.transform_(constraint_3_raw)
         elif task_index == 4:
-            return self.evaluate_slack4_true(X)
+            constraint_4_raw = self.evaluate_slack4_true(X)
+            return self.transform_(constraint_4_raw)
         else:
             raise ValueError("Invalid task index")
+
+    def transform_(self, raw_values):
+        logits = self.transformation(torch.atleast_1d(raw_values))
+        logits = logits[0].view(raw_values.shape)
+        return logits
 
 
 class SpeedReducer(SingleObjectiveProblem):
     _bounds = [(2.6, 3.6), (0.7, 0.8), (17.0, 28.0), (7.3, 8.3), (7.8, 8.3), (2.9, 3.9), (5.0, 5.5)]
+
+    def __init__(self, noise_std=0.0, negate=False):
+        self.dim = 7
+        super().__init__(noise_std=noise_std, negate=negate)
+        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
+        self.transformation = Bilog()
 
     def get_number_of_constraints(self):
         return 7
@@ -862,16 +895,11 @@ class SpeedReducer(SingleObjectiveProblem):
     def get_name(self):
         return "speed_reducer   "
 
-    def __init__(self, noise_std=0.0, negate=False):
-        self.dim = 7
-        super().__init__(noise_std=noise_std, negate=negate)
-        self._bounds = torch.tensor(self._bounds, dtype=torch.float).transpose(-1, -2)
-
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
         x1, x2, x3, x4, x5, x6, x7 = self.get_coordinates(X_tf)
         return 0.7854 * x1 * (x2 ** 2) * (3.3333 * (x3 ** 2) + 14.9334 * x3 - 43.0934) - 1.508 * x1 * (
-                    x6 ** 2 + x7 ** 2) + 7.4777 * (x6 ** 3 + x7 ** 3) + 0.7854 * (x4 * (x6 ** 2) + x5 * (x7 ** 2))
+                x6 ** 2 + x7 ** 2) + 7.4777 * (x6 ** 3 + x7 ** 3) + 0.7854 * (x4 * (x6 ** 2) + x5 * (x7 ** 2))
 
     def get_coordinates(self, X_tf):
         return X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3], X_tf[..., 4], X_tf[..., 5], X_tf[..., 6]
@@ -947,37 +975,55 @@ class SpeedReducer(SingleObjectiveProblem):
         c9 = self.evaluate_slack9_true(X).reshape(-1, 1)
         c10 = self.evaluate_slack10_true(X).reshape(-1, 1)
         c11 = self.evaluate_slack11_true(X).reshape(-1, 1)
-        return torch.concat([y, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11], dim=1)
+        out = torch.concat([y, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11], dim=1)
+        out_transformed = out.clone()
+        out_transformed[..., 1:] = self.transform_(out[..., 1:])
+        return out_transformed
 
     def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
         assert 0 <= task_index <= 11, "Task index must be between 0 and 11"
         if task_index == 0:
             return self.forward(X)
         elif task_index == 1:
-            return self.evaluate_slack1_true(X)
+            constraint_1_raw = self.evaluate_slack1_true(X)
+            return self.transform_(constraint_1_raw)
         elif task_index == 2:
-            return self.evaluate_slack2_true(X)
+            constraint_2_raw = self.evaluate_slack2_true(X)
+            return self.transform_(constraint_2_raw)
         elif task_index == 3:
-            return self.evaluate_slack3_true(X)
+            constraint_3_raw = self.evaluate_slack3_true(X)
+            return self.transform_(constraint_3_raw)
         elif task_index == 4:
-            return self.evaluate_slack4_true(X)
+            constraint_4_raw = self.evaluate_slack4_true(X)
+            return self.transform_(constraint_4_raw)
         elif task_index == 5:
-            return self.evaluate_slack5_true(X)
+            constraint_5_raw = self.evaluate_slack5_true(X)
+            return self.transform_(constraint_5_raw)
         elif task_index == 6:
-            return self.evaluate_slack6_true(X)
+            constraint_6_raw = self.evaluate_slack6_true(X)
+            return self.transform_(constraint_6_raw)
         elif task_index == 7:
-            return self.evaluate_slack7_true(X)
+            constraint_7_raw = self.evaluate_slack7_true(X)
+            return self.transform_(constraint_7_raw)
         elif task_index == 8:
-            return self.evaluate_slack8_true(X)
+            constraint_8_raw = self.evaluate_slack8_true(X)
+            return self.transform_(constraint_8_raw)
         elif task_index == 9:
-            return self.evaluate_slack9_true(X)
+            constraint_9_raw = self.evaluate_slack9_true(X)
+            return self.transform_(constraint_9_raw)
         elif task_index == 10:
-            return self.evaluate_slack10_true(X)
+            constraint_10_raw = self.evaluate_slack10_true(X)
+            return self.transform_(constraint_10_raw)
         elif task_index == 11:
-            return self.evaluate_slack11_true(X)
+            constraint_11_raw = self.evaluate_slack11_true(X)
+            return self.transform_(constraint_11_raw)
         else:
             raise ValueError("Invalid task index")
 
+    def transform_(self, raw_values):
+        logits = self.transformation(torch.atleast_1d(raw_values))
+        logits = logits[0].view(raw_values.shape)
+        return logits
 
 class WeldedBeamSO(SingleObjectiveProblem):
     _bounds = [(0.125, 10.0), (0.1, 10.0), (0.1, 10.0), (0.1, 10.0)]

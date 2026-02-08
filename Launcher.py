@@ -119,15 +119,15 @@ def get_bo_algorithms(decoupled: bool):
     """Returns the appropriate Bayesian Optimization algorithms based on acquisition function type."""
     if decoupled:
         return [
-            #BayesianOptimizationLoopType.DCKG_CKG,
-            #BayesianOptimizationLoopType.DCKG,
-            #BayesianOptimizationLoopType.EIKG,
-            #BayesianOptimizationLoopType.DEI,
+            BayesianOptimizationLoopType.DCKG_CKG,
+            BayesianOptimizationLoopType.DCKG,
+            BayesianOptimizationLoopType.EIKG,
+            BayesianOptimizationLoopType.DEI,
             BayesianOptimizationLoopType.OPTIMISTIC_UCB
         ]
     return [
         BayesianOptimizationLoopType.CEI,
-        #BayesianOptimizationLoopType.CKG,
+        BayesianOptimizationLoopType.CKG,
     ]
 
 
