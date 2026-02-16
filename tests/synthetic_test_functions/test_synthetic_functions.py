@@ -310,13 +310,12 @@ class TestDecoupledKG(BotorchTestCase):
     def test_cnn_becnhmark_takena22_discrete_approximation_2D(self):
         set_all_seeds(8)
         function = const_cnn_cifar10()
+        expected = torch.tensor([[-2., 5., 3., 6., 0.4],
+                                 [0., 8, 4, 5, 1.9]])
         x = torch.tensor([[-2.2, 5.2, 3.1, 5.9, 0.36],
                           [-0.3, 7.6, 4.3, 5.5, 2.0]])
 
         result = function.discretise_inputs(x.clone())
-
-        expected = torch.tensor([[-2., 5., 3., 6., 0.4],
-                                 [0., 8, 4, 5, 1.9]])
 
         self.assertEqual((2, 5), result.shape)
         self.assertAllClose(result, expected)
@@ -325,9 +324,10 @@ class TestDecoupledKG(BotorchTestCase):
         set_all_seeds(8)
         function = const_cnn_cifar10()
         x = torch.tensor([[-1., 7., 6., 4., 1.2]])
+        expected = torch.tensor([[-1., 7., 6., 4., 1.2]])
+
         result = function.discretise_inputs(x.clone())
 
-        expected = torch.tensor([[-1., 7., 6., 4., 1.2]])
         self.assertEqual((1, 5), result.shape)
         self.assertAllClose(result, expected)
 
@@ -370,3 +370,59 @@ class TestDecoupledKG(BotorchTestCase):
         self.assertFalse(function.is_expensive())
         self.assertFalse(function.is_noisy())
         self.assertAllClose(expected, actual)
+
+    def test_cnn_benchmark_takena22_optimal_location(self):
+        set_all_seeds(8)
+        function = const_cnn_cifar10()
+        expected_original_inputs = torch.tensor([[0., 6., 6., 6., 1.5]])
+        normalized_best_recommended_point = function._transform_hypers_to_cube(expected_original_inputs)
+        expected_best_fval = torch.tensor([0.8349473328872954], dtype=torch.float64)
+
+        actual_best_fval = function.evaluate_task(normalized_best_recommended_point, 0)
+        actual_constraint1_value = function.evaluate_task(normalized_best_recommended_point, 1)
+        actual_constraint2_value = function.evaluate_task(normalized_best_recommended_point, 2)
+        actual_constraint3_value = function.evaluate_task(normalized_best_recommended_point, 3)
+        actual_constraint4_value = function.evaluate_task(normalized_best_recommended_point, 4)
+        actual_constraint5_value = function.evaluate_task(normalized_best_recommended_point, 5)
+        actual_constraint6_value = function.evaluate_task(normalized_best_recommended_point, 6)
+        actual_constraint7_value = function.evaluate_task(normalized_best_recommended_point, 7)
+        actual_constraint8_value = function.evaluate_task(normalized_best_recommended_point, 8)
+        actual_constraint9_value = function.evaluate_task(normalized_best_recommended_point, 9)
+        actual_constraint10_value = function.evaluate_task(normalized_best_recommended_point, 10)
+        is_location_feasible1 = actual_constraint1_value <= 0
+        is_location_feasible2 = actual_constraint2_value <= 0
+        is_location_feasible3 = actual_constraint3_value <= 0
+        is_location_feasible4 = actual_constraint4_value <= 0
+        is_location_feasible5 = actual_constraint5_value <= 0
+        is_location_feasible6 = actual_constraint6_value <= 0
+        is_location_feasible7 = actual_constraint7_value <= 0
+        is_location_feasible8 = actual_constraint8_value <= 0
+        is_location_feasible9 = actual_constraint9_value <= 0
+        is_location_feasible10 = actual_constraint10_value <= 0
+        actual_full_vector = function.evaluate_black_box(normalized_best_recommended_point, False)
+
+        self.assertAllClose(expected_best_fval, actual_best_fval, rtol=1e-4)
+        self.assertEqual(True, is_location_feasible1)
+        self.assertEqual(True, is_location_feasible2)
+        self.assertEqual(True, is_location_feasible3)
+        self.assertEqual(True, is_location_feasible4)
+        self.assertEqual(True, is_location_feasible5)
+        self.assertEqual(True, is_location_feasible6)
+        self.assertEqual(True, is_location_feasible7)
+        self.assertEqual(True, is_location_feasible8)
+        self.assertEqual(True, is_location_feasible9)
+        self.assertEqual(True, is_location_feasible10)
+        self.assertAllClose(expected_best_fval.item(), actual_full_vector[:, 0].item(), atol=1e-3)
+        self.assertAllClose(actual_constraint1_value.item(), actual_full_vector[:, 1].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint2_value.item(), actual_full_vector[:, 2].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint3_value.item(), actual_full_vector[:, 3].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint4_value.item(), actual_full_vector[:, 4].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint5_value.item(), actual_full_vector[:, 5].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint6_value.item(), actual_full_vector[:, 6].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint7_value.item(), actual_full_vector[:, 7].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint8_value.item(), actual_full_vector[:, 8].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint9_value.item(), actual_full_vector[:, 9].item(), atol=1e-4)
+        self.assertAllClose(actual_constraint10_value.item(), actual_full_vector[:, 10].item(), atol=1e-4)
+        self.assertFalse(function.is_expensive())
+        self.assertFalse(function.is_noisy())
+        self.assertEqual(actual_full_vector.shape[1], 11)

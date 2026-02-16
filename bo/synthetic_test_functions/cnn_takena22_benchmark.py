@@ -51,13 +51,14 @@ class const_cnn_cifar10(SingleObjectiveProblem):
         self.Y = [self.output_data_transform(Y) for Y in self.Y]
         self.g_thresholds = self.output_data_transform(self.g_thresholds)
 
-        self.CONST_MAX = np.max(self.Y[0][feasible_index])
-        self.GLOBAL_MIN = np.max(self.Y[0])
+        self.CONSTRAINED_MAX = np.max(self.Y[0][feasible_index])
+        self.GLOBAL_MAX = np.max(self.Y[0])
 
-        print(self.CONST_MAX, np.max(self.Y[0]), self.GLOBAL_MIN)
+        print(self.CONSTRAINED_MAX, np.max(self.Y[0]), self.GLOBAL_MAX)
         print("transformed")
-        print(self.output_data_transform(self.CONST_MAX), self.output_data_transform(np.max(self.Y[0])),
-              self.output_data_transform(self.GLOBAL_MIN))
+        print(self.output_data_transform(self.CONSTRAINED_MAX), self.output_data_transform(np.max(self.Y[0])),
+              self.output_data_transform(self.GLOBAL_MAX))
+
 
     def output_data_transform(self, value):
         return np.log(value / (1 - value))
@@ -87,7 +88,7 @@ class const_cnn_cifar10(SingleObjectiveProblem):
         return self.C
 
     def get_penalty(self):
-        return 100.0
+        return 3.0
 
     def evaluate_task(self, input, task_idx):
         input = torch.atleast_2d(input)
@@ -106,6 +107,44 @@ class const_cnn_cifar10(SingleObjectiveProblem):
     def transform_inputs(self, input):
         hypers_transformed = self.transform_cube_to_hypers(input)
         return self.discretise_inputs(hypers_transformed)
+
+    def _transform_hypers_to_cube(self, y):
+        y = torch.atleast_2d(y)
+
+        bounds = torch.tensor([
+            [1 / 1000, 1.0],  # learning rate
+            [32, 256],  # batch_size
+            [8, 64],  # out_channel_1
+            [8, 64],  # out_channel_2
+            [0.0, 1.9]  # rho
+        ], dtype=torch.float)
+
+        lb_index = 0
+        ub_index = 1
+
+        # learning rate (log10)
+        lr_lin = 10 ** y[:, 0]
+        learning_rate = (lr_lin - bounds[0, lb_index]) / (bounds[0, ub_index] - bounds[0, lb_index])
+
+        # batch size (log2)
+        bs_lin = 2 ** y[:, 1]
+        batch_size = (bs_lin - bounds[1, lb_index]) / (bounds[1, ub_index] - bounds[1, lb_index])
+
+        # out_channel_1 (log2)
+        oc1_lin = 2 ** y[:, 2]
+        out_channel_1 = (oc1_lin - bounds[2, lb_index]) / (bounds[2, ub_index] - bounds[2, lb_index])
+
+        # out_channel_2 (log2)
+        oc2_lin = 2 ** y[:, 3]
+        out_channel_2 = (oc2_lin - bounds[3, lb_index]) / (bounds[3, ub_index] - bounds[3, lb_index])
+
+        # rho (linear)
+        rho = (y[:, 4] - bounds[4, lb_index]) / (bounds[4, ub_index] - bounds[4, lb_index])
+
+        return torch.stack(
+            [learning_rate, batch_size, out_channel_1, out_channel_2, rho],
+            dim=0
+        ).T
 
     def transform_cube_to_hypers(self, x):
         # get bounds

@@ -175,7 +175,7 @@ def get_bo_algorithms(decoupled: bool):
 # 2. for different cost acqf: 5
 # 3. for same cost acqf: 1
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Run experiments with --function --min-seed and --max--seed.")
+    parser = argparse.ArgumentParser(description="Run experiments with --function --min-seed and --max-seed.")
     parser.add_argument("--function", type=str, choices=["Mystery",
                                                          "MysteryRedundant",
                                                          "Branin",
@@ -250,12 +250,9 @@ if __name__ == '__main__':
         black_box_function = SpeedReducer(noise_std=1e-6,
                                             negate=True)
         number_initial_designs = 6
-    elif args.function == "two_layer_cnn":
-        black_box_function = TwoLayerCNN_train(negate=False)
-        number_initial_designs = 30
     elif args.function == "two_layer_cnn_discrete":
         black_box_function = const_cnn_cifar10(negate=False)
-        number_initial_designs = 6
+        number_initial_designs = 30
     else:
         raise ValueError(f"Function {args.function} is not supported.")
 
