@@ -14,8 +14,7 @@ from bo.synthetic_test_functions.cnn_takena22_benchmark import const_cnn_cifar10
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
     MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem, \
     TensionCompression, SpeedReducer, BraninHoo, BraninHoo2, BraninHoo3
-device = torch.device("cpu")
-dtype = torch.double
+from bo.device_utils import DEVICE as device, DTYPE as dtype
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -119,15 +118,16 @@ def get_bo_algorithms(decoupled: bool):
     """Returns the appropriate Bayesian Optimization algorithms based on acquisition function type."""
     if decoupled:
         return [
-            BayesianOptimizationLoopType.DCKG_CKG,
-            BayesianOptimizationLoopType.DCKG,
-            BayesianOptimizationLoopType.EIKG,
-            BayesianOptimizationLoopType.DEI,
-            BayesianOptimizationLoopType.OPTIMISTIC_UCB
+            # BayesianOptimizationLoopType.DCKG_ALL_SOURCES,
+            BayesianOptimizationLoopType.DCKG_INDEPENDENT,
+            # BayesianOptimizationLoopType.DCKG,
+            # BayesianOptimizationLoopType.EIKG,
+            # BayesianOptimizationLoopType.DEI,
+            # BayesianOptimizationLoopType.OPTIMISTIC_UCB
         ]
     return [
-        BayesianOptimizationLoopType.CEI,
-        BayesianOptimizationLoopType.CKG,
+        # BayesianOptimizationLoopType.CEI,
+        BayesianOptimizationLoopType.CKG_V2 ,
     ]
 
 

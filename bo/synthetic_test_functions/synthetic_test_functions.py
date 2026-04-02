@@ -39,6 +39,10 @@ class SingleObjectiveProblem(ConstrainedBaseTestProblem):
     def is_expensive(self):
         pass
 
+    def get_objective_transform(self):
+        """Return an OutcomeTransform for the objective GP, or None for default (Standardize)."""
+        return None
+
 
 class MOPTA08(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 1.0)] * 124
@@ -711,6 +715,9 @@ class PressureVessel(SingleObjectiveProblem):
     def is_expensive(self):
         return False
 
+    def get_objective_transform(self):
+        return "gaussian_copula"
+
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3, x4 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
@@ -807,6 +814,9 @@ class TensionCompression(SingleObjectiveProblem):
     def is_expensive(self):
         return False
 
+    def get_objective_transform(self):
+        return "gaussian_copula"
+
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
@@ -894,6 +904,9 @@ class SpeedReducer(SingleObjectiveProblem):
 
     def get_name(self):
         return "speed_reducer   "
+
+    def get_objective_transform(self):
+        return "gaussian_copula"
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
@@ -1048,6 +1061,9 @@ class WeldedBeamSO(SingleObjectiveProblem):
 
     def get_name(self):
         return "welded_beam"
+
+    def get_objective_transform(self):
+        return "gaussian_copula"
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)

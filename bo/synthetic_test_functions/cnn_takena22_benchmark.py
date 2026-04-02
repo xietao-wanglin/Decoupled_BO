@@ -12,8 +12,7 @@ from bo.synthetic_test_functions.synthetic_test_functions import SingleObjective
 def standard_length_scale(bounds):
     return (bounds[1] - bounds[0]) / 2.
 
-device = torch.device("cpu")
-dtype = torch.double
+from bo.device_utils import DEVICE as device, DTYPE as dtype
 
 class const_cnn_cifar10(SingleObjectiveProblem):
     '''
