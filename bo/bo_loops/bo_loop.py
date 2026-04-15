@@ -1476,6 +1476,7 @@ class IndependentSourcesOptimizationLoop(OptimizationLoop):
                     train_x[src_idx] = torch.cat([train_x[src_idx].cpu(), new_x.cpu()])
                     train_y[src_idx] = torch.cat([train_y[src_idx].cpu(), new_y.cpu()])
                 index = all_dckg.n_sources - 1
+                saved_output_index = idx_to_eval_fallback
                 budget_consumed += torch.sum(self.costs[idx_to_eval_fallback])
             else:
                 index = torch.argmax(kg_values / costs_with_ckg)
@@ -1487,11 +1488,13 @@ class IndependentSourcesOptimizationLoop(OptimizationLoop):
                         new_y = self.evaluate_black_box_func(new_x, src_idx)
                         train_x[src_idx] = torch.cat([train_x[src_idx].cpu(), new_x.cpu()])
                         train_y[src_idx] = torch.cat([train_y[src_idx].cpu(), new_y.cpu()])
+                    saved_output_index = idx_to_eval
                     budget_consumed += coupled_cost
                 else:
                     new_y = self.evaluate_black_box_func(new_x, index)
                     train_x[index] = torch.cat([train_x[index].cpu(), new_x.cpu()])
                     train_y[index] = torch.cat([train_y[index].cpu(), new_y.cpu()])
+                    saved_output_index = [index.item()]
                     budget_consumed += self.costs[index]
             model = self.update_model(X=train_x, y=train_y)
 
@@ -1521,7 +1524,7 @@ class IndependentSourcesOptimizationLoop(OptimizationLoop):
                     None if self.black_box_func.is_expensive()
                     else self.evaluate_location_true_quality(new_x)
                 ),
-                acqf_recommended_output_index=index,
+                acqf_recommended_output_index=saved_output_index,
                 acqf_values=kg_values,
                 budget_consumed=budget_consumed,
             )
