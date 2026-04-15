@@ -27,13 +27,17 @@ def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: in
 
 def main():
     min_seed = 0
-    max_seed = 10
+    max_seed = 40
 
     runs = [
         ("PressureVessel", False),
         ("PressureVessel", True),
-        ("two_layer_cnn_discrete", False),
-        ("two_layer_cnn_discrete", True),
+        ("WeldedBeam", False),
+        ("WeldedBeam", True),
+        ("TensionCompression", False),
+        ("TensionCompression", True),
+        ("SpeedReducer", False),
+        ("SpeedReducer", True)
     ]
 
     for function_name, decoupled in runs:
