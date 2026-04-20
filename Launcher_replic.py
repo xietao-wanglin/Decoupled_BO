@@ -30,14 +30,14 @@ def main():
     max_seed = 40
 
     runs = [
-        ("PressureVessel", False),
-        ("PressureVessel", True),
-        # ("WeldedBeam", False),
+        # ("PressureVessel", False),
+        # ("PressureVessel", True),
+        ("WeldedBeam", False),
         # ("WeldedBeam", True),
-        # ("TensionCompression", False),
+        ("TensionCompression", False),
         # ("TensionCompression", True),
-        ("SpeedReducer", False),
-        ("SpeedReducer", True)
+        ("SpeedReducer", False)
+        # ("SpeedReducer", True)
     ]
 
     for function_name, decoupled in runs:
