@@ -32,11 +32,11 @@ def main():
     runs = [
         # ("PressureVessel", False),
         # ("PressureVessel", True),
-        ("WeldedBeam", False),
+        # ("WeldedBeam", False),
         # ("WeldedBeam", True),
-        ("TensionCompression", False),
+        ("SpeedReducer", False),
+        ("TensionCompression", False)
         # ("TensionCompression", True),
-        ("SpeedReducer", False)
         # ("SpeedReducer", True)
     ]
 
