@@ -31,11 +31,19 @@ def main():
 
     runs = [
         # ("PressureVessel", False),
-        # ("PressureVessel", True),
+        ("Mystery", True),
+        ("MysteryRedundant", True),
+        ("TestFunc3", True),
+        ("Branin", True),
+        ("PressureVessel", True),
+        ("SpeedReducer", True),
+        ("two_layer_cnn_discrete", True),
+        ("WeldedBeam", True),
+        ("TensionCompression", True),
         # ("WeldedBeam", False),
         # ("WeldedBeam", True),
-        ("SpeedReducer", False),
-        ("TensionCompression", False)
+        # ("SpeedReducer", False),
+        # ("TensionCompression", False)
         # ("TensionCompression", True),
         # ("SpeedReducer", True)
     ]

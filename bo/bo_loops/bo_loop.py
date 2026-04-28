@@ -4,7 +4,7 @@ from typing import Optional
 
 import torch
 from botorch import gen_candidates_scipy, gen_candidates_torch
-from botorch.acquisition import MCAcquisitionObjective
+from botorch.acquisition import AcquisitionFunction, MCAcquisitionObjective
 from botorch.optim import optimize_acqf
 from botorch.optim.initializers import gen_batch_initial_conditions
 from botorch.utils import draw_sobol_samples
@@ -28,6 +28,27 @@ from bo.result_utils.result_container import Results
 from bo.synthetic_test_functions.synthetic_test_functions import SingleObjectiveProblem
 
 warnings.filterwarnings("ignore")  # Comment out if there are issues
+
+
+class _FixedCandidateV2DcKG(AcquisitionFunction):
+    """Thin wrapper so optimize_acqf optimises only the discretisation.
+
+    V2 source acqfs (ObjectiveDcKG / ConstraintDcKG) consume X of shape
+    (B, 1 + n_disc, d) with slot 0 as the candidate. This wrapper takes Y of
+    shape (B, n_disc, d) and prepends a fixed candidate before forwarding.
+    """
+
+    def __init__(self, base_acqf, fixed_x: Tensor):
+        super().__init__(model=base_acqf.model)
+        self.base = base_acqf
+        self.register_buffer("fixed_x", fixed_x.detach().reshape(1, 1, -1))
+
+    def forward(self, X: Tensor) -> Tensor:
+        if X.dim() == 2:
+            X = X.unsqueeze(0)
+        B = X.shape[0]
+        x_exp = self.fixed_x.to(X).expand(B, 1, -1)
+        return self.base.forward(torch.cat([x_exp, X], dim=1))
 
 
 class OptimizationLoop:
@@ -973,6 +994,42 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
         super().__init__(black_box_func, model, objective, ei_type, seed, budget, performance_type, bounds, results,
                          penalty_value, number_initial_designs, costs)
 
+    def _evaluate_per_source_kg_v2(self, model, new_x, best_observed_location, iteration,
+                                   n_fantasies=7, n_disc=64, num_restarts=15, raw_samples=72):
+        """Per-source V2 dcKG values with candidate fixed, discretisation optimised.
+
+        Returns a tensor of length self.number_of_outputs (objective + K constraints).
+        """
+        K = self.number_of_outputs - 1
+        common = dict(
+            model=model,
+            penalty_value=self.penalty_value,
+            x_best_location=best_observed_location,
+            objective=self.objective,
+            n_fantasies=n_fantasies,
+            seed=iteration,
+        )
+        sources = [ObjectiveDcKG(**common)]
+        for k in range(K):
+            sources.append(ConstraintDcKG(constraint_index=k, **common))
+
+        kg_values = torch.zeros(len(sources), dtype=dtype)
+        for s, base_acqf in enumerate(sources):
+            wrapped = _FixedCandidateV2DcKG(base_acqf, new_x)
+            ics = gen_batch_initial_conditions(
+                acq_function=wrapped, bounds=self.bounds, q=n_disc,
+                num_restarts=num_restarts, raw_samples=raw_samples,
+                options={"seed": iteration + s * 100},
+            )
+            _, vals = optimize_acqf(
+                acq_function=wrapped, bounds=self.bounds, q=n_disc,
+                num_restarts=ics.shape[0], batch_initial_conditions=ics,
+                return_best_only=False, options={"maxiter": 1000},
+            )
+            kg_values[s] = vals.max().detach()
+            print("kgvals: " , kg_values)
+        return kg_values
+
     def run(self):
         best_observed_all_sampled = []
         train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
@@ -1003,20 +1060,12 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
 
             new_x, _ = self.compute_next_sample(acquisition_function=acquisition_function,
                                                 smart_initial_locations=best_observed_location)
-            kg_values_list = torch.zeros(self.number_of_outputs, dtype=dtype)
-            for task_idx in range(self.number_of_outputs):
-                # print("Running Task:", task_idx)
-                acquisition_function = acquisition_function_factory(model=model,
-                                                                    type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
-                                                                    objective=self.objective,
-                                                                    best_value=best_observed_value,
-                                                                    idx=task_idx,
-                                                                    number_of_outputs=self.number_of_outputs,
-                                                                    penalty_value=self.penalty_value,
-                                                                    iteration=iteration,
-                                                                    initial_condition_internal_optimizer=best_observed_location)
-
-                kg_values_list[task_idx] = acquisition_function(new_x)
+            kg_values_list = self._evaluate_per_source_kg_v2(
+                model=model,
+                new_x=new_x,
+                best_observed_location=best_observed_location,
+                iteration=iteration,
+            )
 
             index = torch.argmax(torch.tensor(kg_values_list) / self.costs)
             new_y = self.evaluate_black_box_func(new_x, index)
