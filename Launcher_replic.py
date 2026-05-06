@@ -33,8 +33,8 @@ def main():
         # ("PressureVessel", False),
         ("Mystery", True)
         # ("MysteryRedundant", True),
-        # ("TestFunc3", True),
-        # ("Branin", True),
+        ("TestFunc3", True),
+        ("Branin", True),
         # ("PressureVessel", True),
         # ("SpeedReducer", True),
         # ("two_layer_cnn_discrete", True),

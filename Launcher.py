@@ -119,7 +119,7 @@ def get_bo_algorithms(decoupled: bool):
     if decoupled:
         return [
             # BayesianOptimizationLoopType.DCKG_ALL_SOURCES,
-            # BayesianOptimizationLoopType.DCKG_INDEPENDENT,
+            BayesianOptimizationLoopType.DCKG_INDEPENDENT,
             # BayesianOptimizationLoopType.DCKG,
             BayesianOptimizationLoopType.EIKG,
             # BayesianOptimizationLoopType.DEI,
@@ -258,7 +258,7 @@ if __name__ == '__main__':
 
     # Parameters
     budgets = [160]
-    costs = [None]
+    costs = [5]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)
 
