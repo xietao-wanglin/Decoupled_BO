@@ -31,7 +31,7 @@ def main():
 
     runs = [
         # ("PressureVessel", False),
-        ("Mystery", True)
+        ("Mystery", True),
         # ("MysteryRedundant", True),
         ("TestFunc3", True),
         ("Branin", True),
