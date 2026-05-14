@@ -129,7 +129,7 @@ def get_bo_algorithms(decoupled: bool):
             # BayesianOptimizationLoopType.OPTIMISTIC_UCB
         ]
     return [
-        # BayesianOptimizationLoopType.CEI,
+        BayesianOptimizationLoopType.CEI,
         BayesianOptimizationLoopType.CKG_V2 ,
     ]
 
