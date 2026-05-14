@@ -1,3 +1,5 @@
+import os
+
 from gpytorch import settings
 
 from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType  # includes V2 types
@@ -27,6 +29,45 @@ class BayesianOptimizationLoopFactory:
         self.constrained_obj = constrained_obj
         self.black_box_function = black_box_function
 
+    def _load_or_skip(self, filename, effective_budget):
+        """Detect existing results file and decide whether to skip, resume, or run fresh.
+
+        Returns (results_obj, resume_state_or_None, skip_flag).
+        Skip rule: if any per-iteration history was already saved past `effective_budget`,
+        the run is considered done. We use budget_consumed[-1] when available (decoupled
+        loops record it) and fall back to len(acqf_recommended_location) for coupled
+        loops that don't track budget_consumed.
+        """
+        filepath = os.path.join('results', filename)
+        if not os.path.exists(filepath):
+            return Results(filename=filename), None, False
+        loaded = Results.load_from_file(filepath)
+        if loaded.budget_consumed:
+            last_consumed = float(loaded.budget_consumed[-1])
+        else:
+            last_consumed = float(len(loaded.acqf_recommended_location))
+        if last_consumed >= effective_budget:
+            print(f"[skip] {filename}: consumed={last_consumed} >= target={effective_budget} "
+                  f"(stored budget={loaded.budget})")
+            return loaded, None, True
+        print(f"[resume] {filename}: consumed={last_consumed}, stored budget={loaded.budget}, "
+              f"extending to {effective_budget}")
+        return loaded, {
+            'train_x': loaded.input_data,
+            'train_y': loaded.output_data,
+            'budget_consumed': last_consumed,
+        }, False
+
+    @staticmethod
+    def _resume_kwargs(resume_state):
+        if resume_state is None:
+            return {}
+        return {
+            'initial_train_x': resume_state['train_x'],
+            'initial_train_y': resume_state['train_y'],
+            'initial_budget_consumed': resume_state['budget_consumed'],
+        }
+
     def create(self, bayesian_optimization_loop_type: BayesianOptimizationLoopType, number_initial_designs):
         dim = self.black_box_function.dim
         bounds = torch.zeros(2, dim, device=device, dtype=dtype)
@@ -35,7 +76,10 @@ class BayesianOptimizationLoopFactory:
         performance_type = "model"
         if bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_CKG:
             print('\n Starting dcKG + cKG:')
-            results = Results(filename=self.base_file_name + "_dckg_ckg" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_dckg_ckg" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = CoupledAndDecoupledOptimizationLoop(black_box_func=self.black_box_function,
                                                           objective=self.constrained_obj,
                                                           ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
@@ -47,11 +91,15 @@ class BayesianOptimizationLoopFactory:
                                                           number_initial_designs=number_initial_designs,
                                                           results=results,
                                                           costs=self.costs,
-                                                          penalty_value=torch.tensor([self.penalty_value]))
+                                                          penalty_value=torch.tensor([self.penalty_value]),
+                                                          **self._resume_kwargs(resume_state))
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG:
             print('\n Starting dcKG:')
-            results = Results(filename=self.base_file_name + "_dckg" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_dckg" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = OptimizationLoop(black_box_func=self.black_box_function,
                                        objective=self.constrained_obj,
                                        ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
@@ -63,11 +111,15 @@ class BayesianOptimizationLoopFactory:
                                        number_initial_designs=number_initial_designs,
                                        costs=self.costs,
                                        results=results,
-                                       penalty_value=torch.tensor([self.penalty_value]))
+                                       penalty_value=torch.tensor([self.penalty_value]),
+                                       **self._resume_kwargs(resume_state))
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.EIKG:
             print('\n Starting EI+KG:')
-            results = Results(filename=self.base_file_name + "_ei_kg" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_ei_kg" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = Decoupled_EIKG_OptimizationLoop(black_box_func=self.black_box_function,
                                                       objective=self.constrained_obj,
                                                       ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
@@ -79,11 +131,15 @@ class BayesianOptimizationLoopFactory:
                                                       number_initial_designs=number_initial_designs,
                                                       costs=self.costs,
                                                       results=results,
-                                                      penalty_value=torch.tensor([self.penalty_value]))
+                                                      penalty_value=torch.tensor([self.penalty_value]),
+                                                      **self._resume_kwargs(resume_state))
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DEI:
             print('\n Starting dEI:')
-            results = Results(filename=self.base_file_name + "_dei" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_dei" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = EI_Decoupled_OptimizationLoop(black_box_func=self.black_box_function,
                                                     objective=self.constrained_obj,
                                                     ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
@@ -95,11 +151,16 @@ class BayesianOptimizationLoopFactory:
                                                     number_initial_designs=number_initial_designs,  # 36
                                                     costs=self.costs,
                                                     results=results,
-                                                    penalty_value=torch.tensor([self.penalty_value]))
+                                                    penalty_value=torch.tensor([self.penalty_value]),
+                                                    **self._resume_kwargs(resume_state))
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.CEI:
             print('\n Starting cEI:')
-            results = Results(filename=self.base_file_name + "_cei" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_cei" + str(self.seed) + ".pkl"
+            effective_budget = int(self.budget / (self.number_of_constraints + 1))
+            results, resume_state, skip = self._load_or_skip(filename, effective_budget)
+            if skip:
+                return None
             bo_loop = EI_OptimizationLoop(black_box_func=self.black_box_function,
                                           objective=self.constrained_obj,
                                           ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
@@ -107,28 +168,37 @@ class BayesianOptimizationLoopFactory:
                                           performance_type=performance_type,
                                           model=self.model,
                                           seed=self.seed,
-                                          budget=int(self.budget / (self.number_of_constraints + 1)),
+                                          budget=effective_budget,
                                           number_initial_designs=number_initial_designs,
                                           results=results,
                                           costs=self.costs,
-                                          penalty_value=torch.tensor([self.penalty_value]))
+                                          penalty_value=torch.tensor([self.penalty_value]),
+                                          **self._resume_kwargs(resume_state))
 
         # Coupled cKG
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.CKG:
             print('\n Starting cKG:')
-            results = Results(filename=self.base_file_name + "_ckg" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_ckg" + str(self.seed) + ".pkl"
+            effective_budget = int(self.budget / (self.number_of_constraints + 1))
+            results, resume_state, skip = self._load_or_skip(filename, effective_budget)
+            if skip:
+                return None
             loop = EI_OptimizationLoop(black_box_func=self.black_box_function, objective=self.constrained_obj,
                                        ei_type=AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT,
                                        bounds=bounds,
                                        performance_type=performance_type, model=self.model, seed=self.seed,
-                                       budget=int(self.budget / (self.number_of_constraints + 1)),
+                                       budget=effective_budget,
                                        number_initial_designs=number_initial_designs, results=results,
-                                       penalty_value=torch.tensor([self.penalty_value]))
+                                       penalty_value=torch.tensor([self.penalty_value]),
+                                       **self._resume_kwargs(resume_state))
             bo_loop = loop
         # ---- Refactored GPU-aware variants ----
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_CKG_V2:
             print('\n Starting dcKG + cKG (V2 refactored):')
-            results = Results(filename=self.base_file_name + "_dckg_ckg_v2_" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_dckg_ckg_v2_" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = CoupledAndDecoupledOptimizationLoop(black_box_func=self.black_box_function,
                                                           objective=self.constrained_obj,
                                                           ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
@@ -140,11 +210,15 @@ class BayesianOptimizationLoopFactory:
                                                           number_initial_designs=number_initial_designs,
                                                           results=results,
                                                           costs=self.costs,
-                                                          penalty_value=torch.tensor([self.penalty_value]))
+                                                          penalty_value=torch.tensor([self.penalty_value]),
+                                                          **self._resume_kwargs(resume_state))
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_V2:
             print('\n Starting dcKG (V2 refactored):')
-            results = Results(filename=self.base_file_name + "_dckg_v2_" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_dckg_v2_" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = OptimizationLoop(black_box_func=self.black_box_function,
                                        objective=self.constrained_obj,
                                        ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
@@ -156,23 +230,32 @@ class BayesianOptimizationLoopFactory:
                                        number_initial_designs=number_initial_designs,
                                        costs=self.costs,
                                        results=results,
-                                       penalty_value=torch.tensor([self.penalty_value]))
+                                       penalty_value=torch.tensor([self.penalty_value]),
+                                       **self._resume_kwargs(resume_state))
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.CKG_V2:
             print('\n Starting cKG (V2 refactored):')
-            results = Results(filename=self.base_file_name + "_ckg_v2_" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_ckg_v2_" + str(self.seed) + ".pkl"
+            effective_budget = int(self.budget / (self.number_of_constraints + 1))
+            results, resume_state, skip = self._load_or_skip(filename, effective_budget)
+            if skip:
+                return None
             loop = EI_OptimizationLoop(black_box_func=self.black_box_function, objective=self.constrained_obj,
                                        ei_type=AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
                                        bounds=bounds,
                                        performance_type=performance_type, model=self.model, seed=self.seed,
-                                       budget=int(self.budget / (self.number_of_constraints + 1)),
+                                       budget=effective_budget,
                                        number_initial_designs=number_initial_designs, results=results,
-                                       penalty_value=torch.tensor([self.penalty_value]))
+                                       penalty_value=torch.tensor([self.penalty_value]),
+                                       **self._resume_kwargs(resume_state))
             bo_loop = loop
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_ALL_SOURCES:
             print('\n Starting dcKG all-sources (single optimize_acqf):')
-            results = Results(filename=self.base_file_name + "_dckg_allsrc_" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_dckg_allsrc_" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = AllSourcesOptimizationLoop(
                 black_box_func=self.black_box_function,
                 objective=self.constrained_obj,
@@ -186,11 +269,15 @@ class BayesianOptimizationLoopFactory:
                 costs=self.costs,
                 results=results,
                 penalty_value=torch.tensor([self.penalty_value]),
+                **self._resume_kwargs(resume_state),
             )
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_INDEPENDENT:
             print('\n Starting dcKG independent sources:')
-            results = Results(filename=self.base_file_name + "_dckg_indep_" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_dckg_indep_" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             bo_loop = IndependentSourcesOptimizationLoop(
                 black_box_func=self.black_box_function,
                 objective=self.constrained_obj,
@@ -204,11 +291,15 @@ class BayesianOptimizationLoopFactory:
                 costs=self.costs,
                 results=results,
                 penalty_value=torch.tensor([self.penalty_value]),
+                **self._resume_kwargs(resume_state),
             )
 
         elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.OPTIMISTIC_UCB:
             print('\n Starting optimisitic ucb:')
-            results = Results(filename=self.base_file_name + "_optimistic_ucb" + str(self.seed) + ".pkl")
+            filename = self.base_file_name + "_optimistic_ucb" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
             loop = OPT_UCB_OptimizationLoop(black_box_func=self.black_box_function,
                                             objective=self.constrained_obj,
                                             ei_type=AcquisitionFunctionType.OPTIMISTIC_UCB,
@@ -216,7 +307,8 @@ class BayesianOptimizationLoopFactory:
                                             performance_type=performance_type, model=self.model, seed=self.seed,
                                             budget=self.budget,
                                             number_initial_designs=number_initial_designs, results=results,
-                                            penalty_value=torch.tensor([1000]))
+                                            penalty_value=torch.tensor([1000]),
+                                            **self._resume_kwargs(resume_state))
             bo_loop = loop
         else:
             raise TypeError("Bayesian Optimization loop type not recognized")

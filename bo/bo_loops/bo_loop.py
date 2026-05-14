@@ -57,7 +57,8 @@ class OptimizationLoop:
                  objective: Optional[MCAcquisitionObjective], ei_type: AcquisitionFunctionType, seed: int, budget: int,
                  performance_type: str, bounds: Tensor, results: Results,
                  penalty_value: Optional[Tensor] = torch.tensor([0.0]), number_initial_designs: Optional[int] = 6,
-                 costs: Optional[Tensor] = None
+                 costs: Optional[Tensor] = None,
+                 initial_train_x=None, initial_train_y=None, initial_budget_consumed: float = 0.0,
                  ):
 
         print("Starting Loop: OptimizationLoop")
@@ -78,14 +79,28 @@ class OptimizationLoop:
         self.penalty_value = penalty_value
         self.number_initial_designs = number_initial_designs
         self.costs = costs
+        self.initial_train_x = initial_train_x
+        self.initial_train_y = initial_train_y
+        self.initial_budget_consumed = initial_budget_consumed
+
+    def _initialize_state(self):
+        """Either start fresh or resume from loaded data."""
+        if self.initial_train_x is not None:
+            train_x = self.initial_train_x
+            train_y = self.initial_train_y
+            budget_consumed = float(self.initial_budget_consumed)
+            print(f"[resume] continuing from budget_consumed={budget_consumed} / target={self.budget}")
+        else:
+            train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
+            budget_consumed = 0.0
+        model = self.update_model(train_x, train_y)
+        return train_x, train_y, model, budget_consumed
 
     def run(self):
         best_observed_all_sampled = []
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, budget_consumed = self._initialize_state()
         start_time = time.time()
         iteration = 0
-        budget_consumed = 0
         while budget_consumed < self.budget:
             best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,
@@ -562,19 +577,17 @@ class CoupledAndDecoupledOptimizationLoop(OptimizationLoop):
                  objective: Optional[MCAcquisitionObjective], ei_type: AcquisitionFunctionType, seed: int, budget: int,
                  performance_type: str, bounds: Tensor, results: Results,
                  penalty_value: Optional[Tensor] = torch.tensor([0.0]), number_initial_designs: Optional[int] = 6,
-                 costs: Optional[Tensor] = None):
+                 costs: Optional[Tensor] = None, **kwargs):
 
         super().__init__(black_box_func, model, objective, ei_type, seed, budget, performance_type, bounds, results,
-                         penalty_value, number_initial_designs, costs)
+                         penalty_value, number_initial_designs, costs, **kwargs)
 
     def run(self):
         best_observed_all_sampled = []
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, budget_consumed = self._initialize_state()
 
         start_time = time.time()
         iteration = 0
-        budget_consumed = 0
         while budget_consumed <= self.budget:
             iteration += 1
             best_observed_location, best_observed_value = self.best_observed(
@@ -702,19 +715,17 @@ class EI_Decoupled_OptimizationLoop(OptimizationLoop):
                  objective: Optional[MCAcquisitionObjective], ei_type: AcquisitionFunctionType, seed: int, budget: int,
                  performance_type: str, bounds: Tensor, results: Results,
                  penalty_value: Optional[Tensor] = torch.tensor([0.0]), number_initial_designs: Optional[int] = 6,
-                 costs: Optional[Tensor] = None):
+                 costs: Optional[Tensor] = None, **kwargs):
 
         super().__init__(black_box_func, model, objective, ei_type, seed, budget, performance_type, bounds, results,
-                         penalty_value, number_initial_designs, costs)
+                         penalty_value, number_initial_designs, costs, **kwargs)
 
     def run(self):
         best_observed_all_sampled = []
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, consumed_budget = self._initialize_state()
 
         start_time = time.time()
         iteration = 0
-        consumed_budget = 0
         while consumed_budget < self.budget:
             iteration += 1
             best_observed_location, best_observed_value = self.best_observed(
@@ -851,18 +862,18 @@ class EI_OptimizationLoop(OptimizationLoop):
                  objective: Optional[MCAcquisitionObjective], ei_type: AcquisitionFunctionType, seed: int, budget: int,
                  performance_type: str, bounds: Tensor, results: Results,
                  penalty_value: Optional[Tensor] = torch.tensor([0.0]), number_initial_designs: Optional[int] = 6,
-                 costs: Optional[Tensor] = None):
+                 costs: Optional[Tensor] = None, **kwargs):
 
         super().__init__(black_box_func, model, objective, ei_type, seed, budget, performance_type, bounds, results,
-                         penalty_value, number_initial_designs, costs)
+                         penalty_value, number_initial_designs, costs, **kwargs)
 
     def run(self):
         best_observed_all_sampled = []
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, _ = self._initialize_state()
+        start_iter = (train_x[0].shape[0] - self.number_initial_designs) if self.initial_train_x is not None else 0
 
         start_time = time.time()
-        for iteration in range(self.budget):
+        for iteration in range(start_iter, self.budget):
             best_observed_location, best_observed_value = self.best_observed(
                 best_value_computation_type=self.performance_type,
                 train_x=train_x,
@@ -989,10 +1000,10 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
                  objective: Optional[MCAcquisitionObjective], ei_type: AcquisitionFunctionType, seed: int, budget: int,
                  performance_type: str, bounds: Tensor, results: Results,
                  penalty_value: Optional[Tensor] = torch.tensor([0.0]), number_initial_designs: Optional[int] = 6,
-                 costs: Optional[Tensor] = None):
+                 costs: Optional[Tensor] = None, **kwargs):
 
         super().__init__(black_box_func, model, objective, ei_type, seed, budget, performance_type, bounds, results,
-                         penalty_value, number_initial_designs, costs)
+                         penalty_value, number_initial_designs, costs, **kwargs)
 
     def _evaluate_per_source_kg_v2(self, model, new_x, best_observed_location, iteration,
                                    n_fantasies=7, n_disc=64, num_restarts=15, raw_samples=72):
@@ -1032,11 +1043,9 @@ class Decoupled_EIKG_OptimizationLoop(OptimizationLoop):
 
     def run(self):
         best_observed_all_sampled = []
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, budget_consumed = self._initialize_state()
 
         start_time = time.time()
-        budget_consumed = 0
         iteration = 0
         while budget_consumed < self.budget:
             iteration += 1
@@ -1167,11 +1176,9 @@ class OPT_UCB_OptimizationLoop(OptimizationLoop):
 
     def run(self):
         best_observed_all_sampled = []
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, budget_consumed = self._initialize_state()
 
         start_time = time.time()
-        budget_consumed = 0
         iteration = 0
         while budget_consumed < self.budget:
             iteration += 1
@@ -1273,20 +1280,18 @@ class AllSourcesOptimizationLoop(OptimizationLoop):
 
     def __init__(self, black_box_func, model, objective, ei_type, seed, budget,
                  performance_type, bounds, results, penalty_value=torch.tensor([0.0]),
-                 number_initial_designs=6, costs=None):
+                 number_initial_designs=6, costs=None, **kwargs):
         super().__init__(black_box_func, model, objective, ei_type, seed, budget,
                          performance_type, bounds, results, penalty_value,
-                         number_initial_designs, costs)
+                         number_initial_designs, costs, **kwargs)
 
     def run(self):
 
 
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, budget_consumed = self._initialize_state()
 
         start_time = time.time()
         iteration = 0
-        budget_consumed = 0
 
         while budget_consumed < self.budget:
             iteration += 1
@@ -1410,10 +1415,10 @@ class IndependentSourcesOptimizationLoop(OptimizationLoop):
 
     def __init__(self, black_box_func, model, objective, ei_type, seed, budget,
                  performance_type, bounds, results, penalty_value=torch.tensor([0.0]),
-                 number_initial_designs=6, costs=None):
+                 number_initial_designs=6, costs=None, **kwargs):
         super().__init__(black_box_func, model, objective, ei_type, seed, budget,
                          performance_type, bounds, results, penalty_value,
-                         number_initial_designs, costs)
+                         number_initial_designs, costs, **kwargs)
 
     @staticmethod
     def _optimize_single_source(source_acqf, bounds, x_best, num_restarts=8,
@@ -1468,12 +1473,10 @@ class IndependentSourcesOptimizationLoop(OptimizationLoop):
         return candidates[best:best+1, :].detach(), acqf_values[best].detach()
 
     def run(self):
-        train_x, train_y = self.generate_initial_data(n=self.number_initial_designs)
-        model = self.update_model(train_x, train_y)
+        train_x, train_y, model, budget_consumed = self._initialize_state()
 
         start_time = time.time()
         iteration = 0
-        budget_consumed = 0
 
         warm_cache = {}  # source index -> (1, Q, d) from previous iteration
 

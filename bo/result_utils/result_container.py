@@ -93,6 +93,31 @@ class Results:
             pickle.dump(results_dict, f)
         print(f"Results saved to: {self.filepath} \n")
 
+    @classmethod
+    def load_from_file(cls, filepath):
+        with open(filepath, 'rb') as f:
+            d = pickle.load(f)
+        r = cls(filename=d['filename'])
+        r.filepath = d['path']
+        r.input_data = d['input_data']
+        r.output_data = d['output_data']
+        r.seed = d['seed']
+        r.performance_type = d['performance_type']
+        r.number_initial_samples = d['number_initial_designs']
+        r.budget = d['budget']
+        r.cost_configurations = d['cost_configurations']
+        r.budget_consumed = list(d['budget_consumed'])
+        r.model_length_scales = list(d['model_lengthscales'])
+        r.acqf_values = list(d['acqf_values'])
+        r.best_predicted_location = list(d['best_predicted_location'])
+        r.best_predicted_location_true_value = list(d['best_predicted_location_value'])
+        r.acqf_recommended_location = list(d['acqf_recommended_location'])
+        r.acqf_recommended_location_value = list(d['acqf_recommended_location_value'])
+        r.acqf_recommended_output_index = list(d['acqf_recommended_output_index:'])
+        r.failing_constraint = list(d['failing_index:'])
+        r.evals = list(d['evaluated_functions'])
+        return r
+
     def _build_results_dict(self):
         return {"path": self.filepath,
                 "filename": self.filename,
