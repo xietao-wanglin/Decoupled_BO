@@ -122,7 +122,7 @@ def get_bo_algorithms(decoupled: bool):
     if decoupled:
         return [
             # BayesianOptimizationLoopType.DCKG_ALL_SOURCES,
-            BayesianOptimizationLoopType.DCKG_INDEPENDENT,
+            # BayesianOptimizationLoopType.DCKG_INDEPENDENT,
             # BayesianOptimizationLoopType.DCKG,
             BayesianOptimizationLoopType.EIKG,
             # BayesianOptimizationLoopType.DEI,

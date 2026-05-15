@@ -99,9 +99,8 @@ class const_cnn_cifar10(SingleObjectiveProblem):
             match_index.append(tmp_match_index)
         match_index = torch.tensor([match_index]).ravel()
         if task_idx > 0:
-            return self.g_thresholds[task_idx - 1] - torch.tensor([self.Y[task_idx][match_index]], dtype=dtype,
-                                                                  device=device).reshape(-1)
-        return torch.tensor([self.Y[task_idx][match_index]], dtype=dtype, device=device).reshape(-1)
+            return self.g_thresholds[task_idx - 1] - torch.tensor([self.Y[task_idx][match_index]], dtype=dtype).reshape(-1)
+        return torch.tensor([self.Y[task_idx][match_index]], dtype=dtype).reshape(-1)
 
     def transform_inputs(self, input):
         hypers_transformed = self.transform_cube_to_hypers(input)
