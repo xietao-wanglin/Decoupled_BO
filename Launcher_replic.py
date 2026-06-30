@@ -1,3 +1,4 @@
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -26,8 +27,16 @@ def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: in
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Quick smoke test: run only seeds 0-2",
+    )
+    args = parser.parse_args()
+
     min_seed = 0
-    max_seed = 40
+    max_seed = 1 if args.smoke else 40
 
     runs = [
         # ("PressureVessel", False),
