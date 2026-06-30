@@ -12,8 +12,7 @@ from bo.synthetic_test_functions.synthetic_test_functions import SingleObjective
 def standard_length_scale(bounds):
     return (bounds[1] - bounds[0]) / 2.
 
-device = torch.device("cpu")
-dtype = torch.double
+from bo.device_utils import DEVICE as device, DTYPE as dtype
 
 class const_cnn_cifar10(SingleObjectiveProblem):
     '''
@@ -100,9 +99,8 @@ class const_cnn_cifar10(SingleObjectiveProblem):
             match_index.append(tmp_match_index)
         match_index = torch.tensor([match_index]).ravel()
         if task_idx > 0:
-            return self.g_thresholds[task_idx - 1] - torch.tensor([self.Y[task_idx][match_index]], dtype=dtype,
-                                                                  device=device).reshape(-1)
-        return torch.tensor([self.Y[task_idx][match_index]], dtype=dtype, device=device).reshape(-1)
+            return self.g_thresholds[task_idx - 1] - torch.tensor([self.Y[task_idx][match_index]], dtype=dtype).reshape(-1)
+        return torch.tensor([self.Y[task_idx][match_index]], dtype=dtype).reshape(-1)
 
     def transform_inputs(self, input):
         hypers_transformed = self.transform_cube_to_hypers(input)

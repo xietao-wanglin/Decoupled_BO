@@ -5,9 +5,11 @@ import torch
 from botorch.utils.testing import BotorchTestCase
 from botorch.utils.transforms import normalize
 
+from bo.model.Model import ConstrainedDeoupledGPModelWrapper
 from bo.synthetic_test_functions.cnn_takena22_benchmark import const_cnn_cifar10
 from bo.synthetic_test_functions.synthetic_test_functions import MysteryFunction, ConstrainedBraninNew, \
-    ConstrainedFunc3, PressureVessel, WeldedBeamSO, TwoLayerCNN_train, TensionCompression, SpeedReducer
+    ConstrainedFunc3, ConstrainedFunc3Redundant, PressureVessel, WeldedBeamSO, TwoLayerCNN_train, \
+    TensionCompression, SpeedReducer
 
 device = torch.device("cpu")
 dtype = torch.double
@@ -426,3 +428,107 @@ class TestDecoupledKG(BotorchTestCase):
         self.assertFalse(function.is_expensive())
         self.assertFalse(function.is_noisy())
         self.assertEqual(actual_full_vector.shape[1], 11)
+
+    def test_constrained_func3_redundant_noise(self):
+        f = ConstrainedFunc3Redundant(noise_std=1e-2, negate=True)
+        torch.manual_seed(0)
+        X = torch.rand(10, 2, dtype=torch.double)
+        npo = f.get_noise_per_output()
+
+        # evaluate_black_box: is_repeated=True must be deterministic for all outputs
+        det1 = f.evaluate_black_box(X, is_repeated=True)
+        det2 = f.evaluate_black_box(X, is_repeated=True)
+        self.assertAllClose(det1, det2)
+
+        def _is_noisy(v):
+            return v is not None and float(v) > 1e-6
+
+        # evaluate_black_box: is_repeated=False — float outputs noisy, None near-deterministic
+        noisy1 = f.evaluate_black_box(X, is_repeated=False)
+        noisy2 = f.evaluate_black_box(X, is_repeated=False)
+        for i, v in enumerate(npo):
+            if _is_noisy(v):
+                self.assertFalse(
+                    torch.allclose(noisy1[:, i], noisy2[:, i]),
+                    msg=f"evaluate_black_box output {i} should be stochastic",
+                )
+            else:
+                self.assertAllClose(noisy1[:, i], noisy2[:, i])
+
+        # evaluate_task: float outputs noisy, None near-deterministic
+        for i, v in enumerate(npo):
+            t1 = f.evaluate_task(X, i)
+            t2 = f.evaluate_task(X, i)
+            if _is_noisy(v):
+                self.assertFalse(
+                    torch.allclose(t1, t2),
+                    msg=f"evaluate_task({i}) should be stochastic",
+                )
+            else:
+                self.assertAllClose(t1, t2)
+
+    def test_constrained_func3_redundant_optimal_values(self):
+        expected_best_fval = 0.7483
+        best_recommended_point = torch.tensor([[0.2018, 0.8332]], dtype=torch.double)
+        bounds = torch.tensor([[0.0, 0.0], [1.0, 1.0]], dtype=torch.double)
+        normalized_best_point = normalize(best_recommended_point, bounds=bounds)
+
+        f = ConstrainedFunc3Redundant(noise_std=1e-2, negate=True)
+        bb = f.evaluate_black_box(normalized_best_point, is_repeated=True)
+
+        self.assertEqual(bb.shape, torch.Size([1, 6]))
+        self.assertAllClose(bb[:, 0], torch.tensor([expected_best_fval], dtype=torch.double), atol=1e-3)
+        for i in range(1, 6):
+            self.assertTrue((bb[:, i] <= 0).all(), msg=f"constraint {i} should be feasible at optimum")
+        self.assertAllClose(bb[:, 4], torch.tensor([-100.0], dtype=torch.double))
+        self.assertAllClose(bb[:, 5], torch.tensor([-100.0], dtype=torch.double))
+
+        self.assertTrue(f.is_noisy())
+        self.assertFalse(f.is_expensive())
+        self.assertEqual(f.get_number_of_constraints(), 5)
+        self.assertEqual(f.get_name(), "test_function_3_redundant")
+
+    def test_gp_noise_converges_to_true_levels(self):
+        torch.manual_seed(0)
+        f = ConstrainedFunc3Redundant(noise_std=0, negate=True)
+        npo = f.get_noise_per_output()
+        n_outputs = 6
+
+        N_small, N_large = 20, 200
+        X_all = torch.rand(N_large, 2, dtype=torch.double)
+        Y_all = f.evaluate_black_box(X_all, is_repeated=False)
+
+        def fit_wrapper(X, Y_full):
+            wrapper = ConstrainedDeoupledGPModelWrapper(
+                num_constraints=n_outputs - 1, is_noisy=True
+            )
+            wrapper.fit([X] * n_outputs, [Y_full[:, i] for i in range(n_outputs)])
+            wrapper.optimize()
+            noise_orig = []
+            for i in range(n_outputs):
+                stdvs = wrapper.model.models[i].outcome_transform.stdvs.squeeze().item()
+                noise_orig.append(wrapper.model.models[i].likelihood.noise.item() * stdvs ** 2)
+            return noise_orig
+
+        noise_small = fit_wrapper(X_all[:N_small], Y_all[:N_small])
+        noise_large = fit_wrapper(X_all, Y_all)
+
+        noisy_idxs = [i for i, v in enumerate(npo) if v is not None and float(v) > 1e-6]
+        ndet_idxs = [i for i, v in enumerate(npo) if v is None]
+
+        # Total error across all noisy outputs must decrease with more data
+        total_err_small = sum(abs(noise_small[i] - npo[i]) for i in noisy_idxs)
+        total_err_large = sum(abs(noise_large[i] - npo[i]) for i in noisy_idxs)
+        self.assertLess(
+            total_err_large, total_err_small,
+            msg=(f"N={N_large} total noise error ({total_err_large:.4f}) should be smaller than "
+                 f"N={N_small} ({total_err_small:.4f})")
+        )
+
+        # With N_large, noisy outputs should have clearly higher noise than near-deterministic
+        min_noisy = min(noise_large[i] for i in noisy_idxs)
+        max_ndet = max(noise_large[i] for i in ndet_idxs)
+        self.assertGreater(
+            min_noisy, max_ndet,
+            msg="Noisy outputs should have higher learned noise than near-deterministic outputs"
+        )

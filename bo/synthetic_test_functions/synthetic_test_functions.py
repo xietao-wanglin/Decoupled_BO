@@ -39,6 +39,37 @@ class SingleObjectiveProblem(ConstrainedBaseTestProblem):
     def is_expensive(self):
         pass
 
+    def get_objective_transform(self):
+        """Return an OutcomeTransform for the objective GP, or None for default (Standardize)."""
+        return None
+
+
+class HeterogeneousNoiseProblem(SingleObjectiveProblem):
+    """Base for problems with per-output heterogeneous noise.
+
+    Subclasses implement get_noise_per_output(). Returns is_noisy()=True so the
+    GP model wrapper uses SingleTaskGP without train_Yvar and learns the noise.
+
+    _apply_noise() adds observation noise to outputs whose get_noise_per_output()
+    entry is a float > 1e-6 (STD = sqrt(v)). Outputs with None are near-deterministic
+    and returned unchanged.
+    """
+
+    @abstractmethod
+    def get_noise_per_output(self):
+        pass
+
+    def is_noisy(self):
+        return True
+
+    def _apply_noise(self, val: Tensor, output_idx: int, is_repeated: bool = False) -> Tensor:
+        if is_repeated:
+            return val
+        v = self.get_noise_per_output()[output_idx]
+        if v is not None and float(v) > 1e-6:
+            return val + torch.randn_like(val) * math.sqrt(float(v))
+        return val
+
 
 class MOPTA08(ConstrainedBaseTestProblem):
     _bounds = [(0.0, 1.0)] * 124
@@ -452,6 +483,63 @@ class ConstrainedFunc3(SingleObjectiveProblem):
             raise
 
 
+class ConstrainedFunc3Redundant(HeterogeneousNoiseProblem, ConstrainedFunc3):
+    """ConstrainedFunc3 extended with 2 redundant constraints and heterogeneous noise.
+
+    Active constraints: c1 (noisy), c2 (noiseless), c3 (noiseless).
+    Redundant constraints: c4 (noisy, always -100), c5 (noiseless, always -100).
+    Objective: noisy (via ConstrainedBaseTestProblem.forward when noise_std > 0).
+    """
+
+    def __init__(self, noise_std=0.0, negate=False):
+        super().__init__(noise_std=noise_std, negate=negate)
+
+    def get_number_of_constraints(self):
+        return 5
+
+    def get_name(self):
+        return "test_function_3_redundant"
+
+    def get_noise_per_output(self):
+        # [obj, c1_active, c2_active, c3_active, c4_redundant, c5_redundant]
+        # float > 1e-6: noisy — obs noise STD = sqrt(v); fixed GP noise variance v
+        # None:         near-deterministic — no external observation noise
+        return [0.0038, None, 0.3367, None, None, 4.0]
+
+    def evaluate_slack4_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        return X_tf[..., 0] * 0.0 - 100
+
+    def evaluate_slack5_true(self, X: Tensor) -> Tensor:
+        X_tf = unnormalize(X, self._bounds)
+        return X_tf[..., 0] * 0.0 - 100
+
+    def _obj_true(self, X: Tensor) -> Tensor:
+        val = self.evaluate_true(X)
+        return -val if self.negate else val
+
+    def evaluate_black_box(self, X: Tensor, is_repeated: Optional[bool] = False) -> Tensor:
+        y  = self._apply_noise(self._obj_true(X),                0, is_repeated).reshape(-1, 1)
+        c1 = self._apply_noise(self.evaluate_slack1_true(X),     1, is_repeated).reshape(-1, 1)
+        c2 = self._apply_noise(self.evaluate_slack2_true(X),     2, is_repeated).reshape(-1, 1)
+        c3 = self._apply_noise(self.evaluate_slack3_true(X),     3, is_repeated).reshape(-1, 1)
+        c4 = self._apply_noise(self.evaluate_slack4_true(X),     4, is_repeated).reshape(-1, 1)
+        c5 = self._apply_noise(self.evaluate_slack5_true(X),     5, is_repeated).reshape(-1, 1)
+        return torch.concat([y, c1, c2, c3, c4, c5], dim=1)
+
+    def evaluate_task(self, X: Tensor, task_index: int) -> Tensor:
+        assert 0 <= task_index <= 5, "task_index must be in [0, 5]"
+        fns = [
+            lambda: self._obj_true(X),
+            lambda: self.evaluate_slack1_true(X),
+            lambda: self.evaluate_slack2_true(X),
+            lambda: self.evaluate_slack3_true(X),
+            lambda: self.evaluate_slack4_true(X),
+            lambda: self.evaluate_slack5_true(X),
+        ]
+        return self._apply_noise(fns[task_index](), task_index)
+
+
 class BraninHoo(SingleObjectiveProblem):
     _bounds = [(0.0, 1.0), (0.0, 1.0)]
 
@@ -711,6 +799,9 @@ class PressureVessel(SingleObjectiveProblem):
     def is_expensive(self):
         return False
 
+    def get_objective_transform(self):
+        return "gaussian_copula"
+
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3, x4 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2], X_tf[..., 3]
@@ -807,6 +898,9 @@ class TensionCompression(SingleObjectiveProblem):
     def is_expensive(self):
         return False
 
+    def get_objective_transform(self):
+        return "gaussian_copula"
+
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds.transpose(-1, -2))
         x1, x2, x3 = X_tf[..., 0], X_tf[..., 1], X_tf[..., 2]
@@ -894,6 +988,9 @@ class SpeedReducer(SingleObjectiveProblem):
 
     def get_name(self):
         return "speed_reducer   "
+
+    def get_objective_transform(self):
+        return "gaussian_copula"
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)
@@ -1048,6 +1145,9 @@ class WeldedBeamSO(SingleObjectiveProblem):
 
     def get_name(self):
         return "welded_beam"
+
+    def get_objective_transform(self):
+        return "gaussian_copula"
 
     def evaluate_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)

@@ -13,9 +13,9 @@ from bo.model.Model import ConstrainedDeoupledGPModelWrapper, obj_callable, cons
 from bo.synthetic_test_functions.cnn_takena22_benchmark import const_cnn_cifar10
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
     MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem, \
-    TensionCompression, SpeedReducer, BraninHoo, BraninHoo2, BraninHoo3
-device = torch.device("cpu")
-dtype = torch.double
+    TensionCompression, SpeedReducer, BraninHoo, BraninHoo2, BraninHoo3, ConstrainedFunc3Redundant
+from bo.device_utils import DEVICE as device, DTYPE as dtype
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -61,7 +61,8 @@ def run_experiment_decoupled_acquisition_functions(black_box_function: SingleObj
                                                           base_file_name=filename_pf + cost_label)
 
         bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_of_initial_designs)
-        bo_loop.run()
+        if bo_loop is not None:
+            bo_loop.run()
     else:
         for i in range(number_of_constraints + 1):
             costs = torch.ones(number_of_constraints + 1)
@@ -86,7 +87,8 @@ def run_experiment_decoupled_acquisition_functions(black_box_function: SingleObj
                                                               base_file_name=filename_pf + cost_label)
 
             bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_initial_designs)
-            bo_loop.run()
+            if bo_loop is not None:
+                bo_loop.run()
 
 
 def run_experiment_coupled_acquisition_functions(black_box_function: SingleObjectiveProblem,
@@ -112,22 +114,24 @@ def run_experiment_coupled_acquisition_functions(black_box_function: SingleObjec
                                                       base_file_name=filename_pf + cost_label)
 
     bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_of_initial_designs)
-    bo_loop.run()
+    if bo_loop is not None:
+        bo_loop.run()
 
 
 def get_bo_algorithms(decoupled: bool):
     """Returns the appropriate Bayesian Optimization algorithms based on acquisition function type."""
     if decoupled:
         return [
-            BayesianOptimizationLoopType.DCKG_CKG,
-            BayesianOptimizationLoopType.DCKG,
-            BayesianOptimizationLoopType.EIKG,
-            BayesianOptimizationLoopType.DEI,
-            BayesianOptimizationLoopType.OPTIMISTIC_UCB
+            # BayesianOptimizationLoopType.DCKG_ALL_SOURCES,
+            BayesianOptimizationLoopType.DCKG_INDEPENDENT,
+            # BayesianOptimizationLoopType.DCKG,
+            # BayesianOptimizationLoopType.EIKG,
+            # BayesianOptimizationLoopType.DEI,
+            # BayesianOptimizationLoopType.OPTIMISTIC_UCB
         ]
     return [
         BayesianOptimizationLoopType.CEI,
-        BayesianOptimizationLoopType.CKG,
+        BayesianOptimizationLoopType.CKG_V2,
     ]
 
 
@@ -180,6 +184,7 @@ if __name__ == '__main__':
                                                          "MysteryRedundant",
                                                          "Branin",
                                                          "TestFunc3",
+                                                         "TestFunc3Redundant",
                                                          "WeldedBeam",
                                                          "BraninHoo",
                                                          "BraninHoo2",
@@ -211,53 +216,67 @@ if __name__ == '__main__':
                                                            negate=True,
                                                            redundant_constraints=False)
         number_initial_designs = 6
+        budgets = [160]
     elif args.function == "MysteryRedundant":
         black_box_function = MysteryFunctionSuperRedundant(noise_std=1e-6,
                                                            negate=True,
                                                            redundant_constraints=True)
         number_initial_designs = 6
+        budgets = [160]
     elif args.function == "TestFunc3":
         black_box_function = ConstrainedFunc3(noise_std=1e-6,
                                               negate=True)
         number_initial_designs = 6
+        budgets = [160]
+    elif args.function == "TestFunc3Redundant":
+        black_box_function = ConstrainedFunc3Redundant(noise_std=0.0,
+                                                       negate=True)
+        number_initial_designs = 6
+        budgets = [160]
     elif args.function == "Branin":
         black_box_function = ConstrainedBraninNew(noise_std=1e-6,
                                                   negate=True)
         number_initial_designs = 6
+        budgets = [160]
     elif args.function == "BraninHoo":
         black_box_function = BraninHoo(noise_std=1e-2, negate=True)
         number_initial_designs = 3
+        budgets = [160]
     elif args.function == "BraninHoo2":
         black_box_function = BraninHoo2(noise_std=1e-2, negate=True)
         number_initial_designs = 5
+        budgets = [160]
     elif args.function == "BraninHoo3":
         black_box_function = BraninHoo3(noise_std=1e-2, negate=True)
         number_initial_designs = 5
+        budgets = [160]
     elif args.function == "WeldedBeam":
         black_box_function = WeldedBeamSO(noise_std=1e-6,
                                           negate=True)
         number_initial_designs = 6
+        budgets = [160]
     elif args.function == "TensionCompression":
         black_box_function = TensionCompression(noise_std=1e-6,
                                                 negate=True)
         number_initial_designs = 6
+        budgets = [160]
     elif args.function == "PressureVessel":
         black_box_function = PressureVessel(noise_std=1e-6,
                                             negate=True)
         number_initial_designs = 6
-
+        budgets = [160]
     elif args.function == "SpeedReducer":
         black_box_function = SpeedReducer(noise_std=1e-6,
-                                            negate=True)
+                                          negate=True)
         number_initial_designs = 6
     elif args.function == "two_layer_cnn_discrete":
         black_box_function = const_cnn_cifar10(negate=False)
         number_initial_designs = 30
+        budgets = [300]
     else:
         raise ValueError(f"Function {args.function} is not supported.")
 
     # Parameters
-    budgets = [160]
     costs = [None]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)
