@@ -45,11 +45,12 @@ def main():
         # ("TestFunc3", True),
         # ("Branin", True),
         # ("PressureVessel", True),
-        # ("SpeedReducer", True),
+        ("SpeedReducer", True),
+        ("SpeedReducer", False)
         # ("two_layer_cnn_discrete", True),
         # ("two_layer_cnn_discrete", False),
-        ("TestFunc3Redundant", True),
-        ("TestFunc3Redundant", False)
+        # ("TestFunc3Redundant", True),
+        # ("TestFunc3Redundant", False)
         # ("WeldedBeam", True),
         # ("TensionCompression", True),
         # ("WeldedBeam", False),
