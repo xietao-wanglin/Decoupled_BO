@@ -975,7 +975,7 @@ class SpeedReducer(SingleObjectiveProblem):
         self.transformation = Bilog()
 
     def get_number_of_constraints(self):
-        return 7
+        return 11
 
     def is_noisy(self):
         return False
