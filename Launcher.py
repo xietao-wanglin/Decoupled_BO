@@ -269,6 +269,7 @@ if __name__ == '__main__':
         black_box_function = SpeedReducer(noise_std=1e-6,
                                           negate=True)
         number_initial_designs = 6
+        budgets = [160]
     elif args.function == "two_layer_cnn_discrete":
         black_box_function = const_cnn_cifar10(negate=False)
         number_initial_designs = 30
