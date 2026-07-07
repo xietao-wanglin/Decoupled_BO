@@ -185,6 +185,8 @@ if __name__ == '__main__':
                                                          "Branin",
                                                          "TestFunc3",
                                                          "TestFunc3Redundant",
+                                                         "TestFunc3RedundantC1",
+                                                         "TestFunc3RedundantC3",
                                                          "WeldedBeam",
                                                          "BraninHoo",
                                                          "BraninHoo2",
@@ -231,6 +233,18 @@ if __name__ == '__main__':
     elif args.function == "TestFunc3Redundant":
         black_box_function = ConstrainedFunc3Redundant(noise_std=0.0,
                                                        negate=True)
+        number_initial_designs = 6
+        budgets = [160]
+    elif args.function == "TestFunc3RedundantC1":
+        black_box_function = ConstrainedFunc3Redundant(noise_std=0.0,
+                                                       negate=True,
+                                                       noisy_active_constraint=1)
+        number_initial_designs = 6
+        budgets = [160]
+    elif args.function == "TestFunc3RedundantC3":
+        black_box_function = ConstrainedFunc3Redundant(noise_std=0.0,
+                                                       negate=True,
+                                                       noisy_active_constraint=3)
         number_initial_designs = 6
         budgets = [160]
     elif args.function == "Branin":

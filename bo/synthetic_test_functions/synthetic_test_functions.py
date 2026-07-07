@@ -486,25 +486,36 @@ class ConstrainedFunc3(SingleObjectiveProblem):
 class ConstrainedFunc3Redundant(HeterogeneousNoiseProblem, ConstrainedFunc3):
     """ConstrainedFunc3 extended with 2 redundant constraints and heterogeneous noise.
 
-    Active constraints: c1 (noisy), c2 (noiseless), c3 (noiseless).
-    Redundant constraints: c4 (noisy, always -100), c5 (noiseless, always -100).
-    Objective: noisy (via ConstrainedBaseTestProblem.forward when noise_std > 0).
+    Exactly one active constraint (c1, c2, or c3 — chosen via `noisy_active_constraint`)
+    carries observation noise at ~20% of its signal std; the other two active constraints
+    are noiseless. Redundant constraints: c4 (noiseless, always -100), c5 (noisy,
+    always -100). Objective: always noisy (~20% of its signal std).
     """
 
-    def __init__(self, noise_std=0.0, negate=False):
+    # Per-active-constraint noise variance ~= (0.2 * signal_std)^2, estimated by sampling.
+    _ACTIVE_NOISE_VAR = {1: 0.1642, 2: 0.3367, 3: 0.0004}
+
+    def __init__(self, noise_std=0.0, negate=False, noisy_active_constraint=2):
+        assert noisy_active_constraint in (1, 2, 3), \
+            "noisy_active_constraint must be 1, 2, or 3"
+        self.noisy_active_constraint = noisy_active_constraint
         super().__init__(noise_std=noise_std, negate=negate)
 
     def get_number_of_constraints(self):
         return 5
 
     def get_name(self):
-        return "test_function_3_redundant"
+        if self.noisy_active_constraint == 2:
+            return "test_function_3_redundant"
+        return f"test_function_3_redundant_c{self.noisy_active_constraint}noisy"
 
     def get_noise_per_output(self):
         # [obj, c1_active, c2_active, c3_active, c4_redundant, c5_redundant]
         # float > 1e-6: noisy — obs noise STD = sqrt(v); fixed GP noise variance v
         # None:         near-deterministic — no external observation noise
-        return [0.0038, None, 0.3367, None, None, 4.0]
+        npo = [0.0038, None, None, None, None, 4.0]
+        npo[self.noisy_active_constraint] = self._ACTIVE_NOISE_VAR[self.noisy_active_constraint]
+        return npo
 
     def evaluate_slack4_true(self, X: Tensor) -> Tensor:
         X_tf = unnormalize(X, self._bounds)

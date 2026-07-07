@@ -488,6 +488,27 @@ class TestDecoupledKG(BotorchTestCase):
         self.assertEqual(f.get_number_of_constraints(), 5)
         self.assertEqual(f.get_name(), "test_function_3_redundant")
 
+    def test_constrained_func3_redundant_noisy_active_constraint_variants(self):
+        # noisy_active_constraint selects which of c1/c2/c3 carries observation noise;
+        # obj (index 0) and c5 (index 5) are noisy in every variant, c4 (index 4) never is.
+        expected_name = {1: "test_function_3_redundant_c1noisy",
+                         2: "test_function_3_redundant",
+                         3: "test_function_3_redundant_c3noisy"}
+        for k in (1, 2, 3):
+            f = ConstrainedFunc3Redundant(noise_std=0.0, negate=True, noisy_active_constraint=k)
+            self.assertEqual(f.get_name(), expected_name[k])
+
+            npo = f.get_noise_per_output()
+            self.assertEqual(len(npo), 6)
+            self.assertIsNotNone(npo[0])
+            self.assertIsNone(npo[4])
+            self.assertIsNotNone(npo[5])
+            for c in (1, 2, 3):
+                if c == k:
+                    self.assertIsNotNone(npo[c], msg=f"constraint {c} should be noisy when k={k}")
+                else:
+                    self.assertIsNone(npo[c], msg=f"constraint {c} should be noiseless when k={k}")
+
     def test_gp_noise_converges_to_true_levels(self):
         torch.manual_seed(0)
         f = ConstrainedFunc3Redundant(noise_std=0, negate=True)
