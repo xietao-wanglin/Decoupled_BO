@@ -83,18 +83,18 @@ def main():
     print(f"x_star_ref (4D box)  = {Z[best_idx].numpy()}")
     print(f"x_star_ref (6D bolt) = {X_bolt[best_idx].numpy()}")
 
-    # out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bolt_dmo_reference.pickle")
-    # with open(out_path, "wb") as f:
-    #     pickle.dump({
-    #         "Z": Z.numpy(),
-    #         "X_bolt": X_bolt.numpy(),
-    #         "Y": Y,
-    #         "output_order": ["IFEval", "MATH-500", "MBPP+"],
-    #         "quantile_if": QUANTILE_IF,
-    #         "quantile_mbpp": QUANTILE_MBPP,
-    #         "seed": SEED,
-    #     }, f)
-    # print(f"\nSaved {out_path}")
+    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bolt_dmo_reference.pickle")
+    with open(out_path, "wb") as f:
+        pickle.dump({
+            "Z": Z.numpy(),
+            "X_bolt": X_bolt.numpy(),
+            "Y": Y,
+            "output_order": ["IFEval", "MATH-500", "MBPP+"],
+            "quantile_if": QUANTILE_IF,
+            "quantile_mbpp": QUANTILE_MBPP,
+            "seed": SEED,
+        }, f)
+    print(f"\nSaved {out_path}")
 
 
 if __name__ == "__main__":

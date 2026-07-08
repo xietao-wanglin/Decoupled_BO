@@ -51,10 +51,12 @@ def main():
         # ("two_layer_cnn_discrete", False),
         # ("TestFunc3Redundant", True),
         # ("TestFunc3Redundant", False)
-        ("TestFunc3RedundantC1", True),
-        ("TestFunc3RedundantC1", False),
-        ("TestFunc3RedundantC3", True),
-        ("TestFunc3RedundantC3", False),
+        # ("TestFunc3RedundantC1", True),
+        # ("TestFunc3RedundantC1", False),
+        # ("TestFunc3RedundantC3", True),
+        # ("TestFunc3RedundantC3", False),
+        ("bolt_dmo", False),
+        ("bolt_dmo", True)
         # ("WeldedBeam", True),
         # ("TensionCompression", True),
         # ("WeldedBeam", False),
