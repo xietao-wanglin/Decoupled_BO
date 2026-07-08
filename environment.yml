@@ -111,6 +111,7 @@ dependencies:
       - filelock==3.13.4
       - fsspec==2024.3.1
       - gpytorch==1.11
+      - huggingface-hub==1.22.0  # BoLT DMCurriculumMO emulator download (bolt_emulator.py)
       - idna==3.11
       - iniconfig==2.3.0
       - ipykernel==6.30.1
@@ -162,6 +163,7 @@ dependencies:
       - pyzmq==27.1.0
       - requests==2.32.5
       - scikit-learn==1.4.1.post1
+      - safetensors==0.8.0  # BoLT emulator weights loading (bolt_emulator.py)
       - scipy==1.13.0
       - soupsieve==2.8
       - stack-data==0.6.3

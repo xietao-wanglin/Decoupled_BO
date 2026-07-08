@@ -10,6 +10,7 @@ from botorch.acquisition import ConstrainedMCObjective
 from bo.bo_loops.bayesian_optimization_factory import BayesianOptimizationLoopFactory
 from bo.bo_loops.bayesian_optimization_loop_type import BayesianOptimizationLoopType
 from bo.model.Model import ConstrainedDeoupledGPModelWrapper, obj_callable, constraint_callable_wrapper
+from bo.synthetic_test_functions.bolt_dmo_benchmark import DecoupledBOLTDMO
 from bo.synthetic_test_functions.cnn_takena22_benchmark import const_cnn_cifar10
 from bo.synthetic_test_functions.synthetic_test_functions import ConstrainedFunc3, ConstrainedBraninNew, \
     MysteryFunctionSuperRedundant, WeldedBeamSO, PressureVessel, TwoLayerCNN_train, SingleObjectiveProblem, \
@@ -195,7 +196,8 @@ if __name__ == '__main__':
                                                          "PressureVessel",
                                                          "SpeedReducer",
                                                          "two_layer_cnn",
-                                                         "two_layer_cnn_discrete"],
+                                                         "two_layer_cnn_discrete",
+                                                         "bolt_dmo"],
                         required=True,
                         help="Choose the function")
 
@@ -286,6 +288,10 @@ if __name__ == '__main__':
         budgets = [160]
     elif args.function == "two_layer_cnn_discrete":
         black_box_function = const_cnn_cifar10(negate=False)
+        number_initial_designs = 30
+        budgets = [300]
+    elif args.function == "bolt_dmo":
+        black_box_function = DecoupledBOLTDMO(negate=False)
         number_initial_designs = 30
         budgets = [300]
     else:
