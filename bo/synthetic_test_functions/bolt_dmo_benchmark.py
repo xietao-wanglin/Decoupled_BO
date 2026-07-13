@@ -22,14 +22,17 @@ class DecoupledBOLTDMO(SingleObjectiveProblem):
     two-simplex representation, so the known simplex constraints are handled by
     parameterization rather than modelled as black-box constraints.
     Thresholds and the reference optimum come from a fixed Sobol reference set
-    (see bolt_dmo_data/generate_reference_set.py).
+    (see bolt_dmo_data/generate_reference_set.py). By default the thresholds use
+    the quantiles stored in the pickle (0.6/0.6, ~20% joint feasible rate);
+    pass quantile_if/quantile_mbpp to tighten or loosen the feasible region
+    (e.g. 0.775/0.775 gives ~10%).
     """
     _bounds = [(0., 1.), (0., 1.), (0., 1.), (0., 1.)]
 
     # Emulator output column order.
     IFEVAL_COL, MATH_COL, MBPP_COL = 0, 1, 2
 
-    def __init__(self, noise_std=0.0, negate=False):
+    def __init__(self, noise_std=0.0, negate=False, quantile_if=None, quantile_mbpp=None):
         self.dim = 4
         super().__init__(noise_std=noise_std, negate=negate)
         self._bounds = torch.tensor(self._bounds, dtype=dtype).transpose(-1, -2)
@@ -43,13 +46,19 @@ class DecoupledBOLTDMO(SingleObjectiveProblem):
         with open(file_path, 'rb') as f:
             reference = pickle.load(f)
 
+        self._default_quantiles = quantile_if is None and quantile_mbpp is None
+        self.quantile_if = reference["quantile_if"] if quantile_if is None else quantile_if
+        self.quantile_mbpp = reference["quantile_mbpp"] if quantile_mbpp is None else quantile_mbpp
+
         Y = reference["Y"]
         if_scores, math_scores, mbpp_scores = Y[:, self.IFEVAL_COL], Y[:, self.MATH_COL], Y[:, self.MBPP_COL]
-        tau_if = np.quantile(if_scores, reference["quantile_if"])
-        tau_mbpp = np.quantile(mbpp_scores, reference["quantile_mbpp"])
+        tau_if = np.quantile(if_scores, self.quantile_if)
+        tau_mbpp = np.quantile(mbpp_scores, self.quantile_mbpp)
 
         feasible = (if_scores >= tau_if) & (mbpp_scores >= tau_mbpp)
-        print('number of feasible points:', feasible.sum(), 'of', len(feasible))
+        print(f'quantiles (if, mbpp): ({self.quantile_if}, {self.quantile_mbpp}) | '
+              f'number of feasible points: {feasible.sum()} of {len(feasible)} '
+              f'({feasible.mean():.1%})')
 
         self.g_thresholds = torch.tensor(self.output_data_transform(np.array([tau_if, tau_mbpp])), dtype=dtype)
         math_logit = self.output_data_transform(math_scores)
@@ -108,7 +117,10 @@ class DecoupledBOLTDMO(SingleObjectiveProblem):
         return False
 
     def get_name(self):
-        return "bolt_dmo"
+        if self._default_quantiles:
+            return "bolt_dmo"
+        # Per-mille quantiles keep the name filesystem-friendly, e.g. bolt_dmo_q775_775.
+        return f"bolt_dmo_q{round(self.quantile_if * 1000)}_{round(self.quantile_mbpp * 1000)}"
 
     def get_number_of_constraints(self):
         return self.C

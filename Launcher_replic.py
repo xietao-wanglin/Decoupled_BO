@@ -55,8 +55,8 @@ def main():
         # ("TestFunc3RedundantC1", False),
         # ("TestFunc3RedundantC3", True),
         # ("TestFunc3RedundantC3", False),
-        ("bolt_dmo", False),
-        ("bolt_dmo", True)
+        ("bolt_dmo_10", False),
+        ("bolt_dmo_10", True)
         # ("WeldedBeam", True),
         # ("TensionCompression", True),
         # ("WeldedBeam", False),

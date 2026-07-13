@@ -197,7 +197,8 @@ if __name__ == '__main__':
                                                          "SpeedReducer",
                                                          "two_layer_cnn",
                                                          "two_layer_cnn_discrete",
-                                                         "bolt_dmo"],
+                                                         "bolt_dmo",
+                                                         "bolt_dmo_10"],
                         required=True,
                         help="Choose the function")
 
@@ -292,6 +293,14 @@ if __name__ == '__main__':
         budgets = [300]
     elif args.function == "bolt_dmo":
         black_box_function = DecoupledBOLTDMO(negate=False)
+        number_initial_designs = 30
+        budgets = [300]
+    elif args.function == "bolt_dmo_10":
+        # Quantiles 0.775/0.775 give a ~10% joint feasible rate on the reference
+        # set (vs ~20% for the default 0.6/0.6).
+        black_box_function = DecoupledBOLTDMO(negate=False,
+                                              quantile_if=0.775,
+                                              quantile_mbpp=0.775)
         number_initial_designs = 30
         budgets = [300]
     else:

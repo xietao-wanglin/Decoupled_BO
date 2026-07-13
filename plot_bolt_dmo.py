@@ -15,7 +15,6 @@ REFERENCE_PICKLE = "bo/synthetic_test_functions/bolt_dmo_data/bolt_dmo_reference
 
 METHODS = {
     "dckg_indep": ("dckg_indep", "dcKG"),
-    "ei_kg": ("ei_kg", "cEI+"),
     "ckg_v2": ("ckg_v2", "cKG"),
     "cei": ("cei", "cEI"),
 }
