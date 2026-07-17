@@ -15,6 +15,7 @@ Reparametrisation (Section 3.5):
   σ̃(x', x)   = κ^m(x', x) / √(σ^m(x, x) + σ²_noise)
 """
 
+import warnings
 from typing import Optional
 
 import gpytorch
@@ -306,9 +307,11 @@ class BaseConstrainedKG(DecoupledAcquisitionFunction, MCAcquisitionFunction):
             "numba is required but is not installed. "
             "Install it with: conda install numba"
         )
-        assert torch.cuda.is_available(), (
-            "A CUDA GPU is required but none was detected."
-        )
+        if not torch.cuda.is_available():
+            warnings.warn(
+                "Fast constrained KG is running on CPU (no CUDA GPU detected); "
+                "expect it to be slow."
+            )
         super().__init__(
             model=model, sampler=sampler, objective=objective,
             posterior_transform=posterior_transform,
@@ -577,9 +580,11 @@ class AllSourcesDcKG(torch.nn.Module):
             "numba is required for AllSourcesDcKG but is not installed. "
             "Install it with: conda install numba"
         )
-        assert torch.cuda.is_available(), (
-            "AllSourcesDcKG requires a CUDA GPU but none was detected."
-        )
+        if not torch.cuda.is_available():
+            warnings.warn(
+                "AllSourcesDcKG is running on CPU (no CUDA GPU detected); "
+                "expect it to be slow."
+            )
         super().__init__()
         self.model = model
         try:

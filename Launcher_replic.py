@@ -40,10 +40,13 @@ def main():
 
     runs = [
         # ("PressureVessel", False),
-        # ("Mystery", True),
+        ("Mystery", True),
+        ("Mystery", False),
         # ("MysteryRedundant", True),
-        # ("TestFunc3", True),
-        # ("Branin", True),
+        ("TestFunc3", True),
+        ("TestFunc3", False),
+        ("Branin", True),
+        ("Branin", False)
         # ("PressureVessel", True),
         # ("SpeedReducer", True),
         # ("SpeedReducer", False)
@@ -55,8 +58,8 @@ def main():
         # ("TestFunc3RedundantC1", False),
         # ("TestFunc3RedundantC3", True),
         # ("TestFunc3RedundantC3", False),
-        ("bolt_dmo_10", False),
-        ("bolt_dmo_10", True)
+        # ("bolt_dmo_10", False),
+        # ("bolt_dmo_10", True)
         # ("WeldedBeam", True),
         # ("TensionCompression", True),
         # ("WeldedBeam", False),
