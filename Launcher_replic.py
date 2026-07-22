@@ -7,7 +7,7 @@ from pathlib import Path
 TARGET_SCRIPT = Path(__file__).with_name("Launcher.py")
 
 
-def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: int):
+def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: int, cost=None):
     cmd = [
         sys.executable,
         str(TARGET_SCRIPT),
@@ -21,6 +21,9 @@ def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: in
 
     if decoupled:
         cmd.append("--decoupled")
+
+    if cost is not None:
+        cmd += ["--cost", str(cost)]
 
     print("Running:", " ".join(cmd))
     subprocess.run(cmd, check=True)
@@ -39,43 +42,27 @@ def main():
     max_seed = 1 if args.smoke else 40
 
     runs = [
-        # ("PressureVessel", False),
-        ("Mystery", True),
-        ("Mystery", False),
-        # ("MysteryRedundant", True),
-        ("TestFunc3", True),
-        ("TestFunc3", False),
-        ("Branin", True),
-        ("Branin", False)
-        # ("PressureVessel", True),
-        # ("SpeedReducer", True),
-        # ("SpeedReducer", False)
-        # ("two_layer_cnn_discrete", True),
-        # ("two_layer_cnn_discrete", False),
-        # ("TestFunc3Redundant", True),
-        # ("TestFunc3Redundant", False)
-        # ("TestFunc3RedundantC1", True),
-        # ("TestFunc3RedundantC1", False),
-        # ("TestFunc3RedundantC3", True),
-        # ("TestFunc3RedundantC3", False),
-        # ("bolt_dmo_10", False),
-        # ("bolt_dmo_10", True)
-        # ("WeldedBeam", True),
-        # ("TensionCompression", True),
-        # ("WeldedBeam", False),
-        # ("WeldedBeam", True),
-        # ("SpeedReducer", False),
-        # ("TensionCompression", False)
-        # ("TensionCompression", True),
-        # ("SpeedReducer", True)
+        # (function_name, decoupled, cost)
+        ("MysteryRedundant", True, None),
+        ("MysteryRedundant", False, None),
+        # Unequal-cost decoupled experiments (cost=5 makes each source expensive in turn).
+        ("Mystery", True, 5),      # 1 constraint -> [5,1] / [1,5]
+        ("TestFunc3", True, 5),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
+        ("Branin", True, 5),       # 1 constraint -> [5,1] / [1,5]
+        # ("PressureVessel", False, None),
+        # ("SpeedReducer", True, None),
+        # ("two_layer_cnn_discrete", True, None),
+        # ("WeldedBeam", True, None),
+        # ("TensionCompression", True, None),
     ]
 
-    for function_name, decoupled in runs:
+    for function_name, decoupled, cost in runs:
         run_command(
             function_name=function_name,
             decoupled=decoupled,
             min_seed=min_seed,
             max_seed=max_seed,
+            cost=cost,
         )
 
 

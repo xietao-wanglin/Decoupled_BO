@@ -87,7 +87,7 @@ def run_experiment_decoupled_acquisition_functions(black_box_function: SingleObj
                                                               costs=costs, number_of_constraints=number_of_constraints,
                                                               base_file_name=filename_pf + cost_label)
 
-            bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_initial_designs)
+            bo_loop = bo_loop_factory.create(bayesian_optimization_algorithm, number_of_initial_designs)
             if bo_loop is not None:
                 bo_loop.run()
 
@@ -213,6 +213,11 @@ if __name__ == '__main__':
     parser.add_argument("--max-seed", type=int, default=39,
                         help="Maximum seed value (inclusive)")
 
+    parser.add_argument("--cost", type=float, default=None,
+                        help="Expensive-source cost for decoupled runs. When set, each source "
+                             "is made expensive in turn (objective, then each constraint). "
+                             "Ignored for coupled runs.")
+
     args = parser.parse_args()
 
     # Select the function based on the argument
@@ -307,7 +312,7 @@ if __name__ == '__main__':
         raise ValueError(f"Function {args.function} is not supported.")
 
     # Parameters
-    costs = [None]
+    costs = [args.cost]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)
 
