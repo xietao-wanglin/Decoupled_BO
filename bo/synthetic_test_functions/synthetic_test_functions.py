@@ -321,6 +321,8 @@ class MysteryFunctionSuperRedundant(SingleObjectiveProblem):
         return 40.0
 
     def get_name(self):
+        if self.redundant_constraints:
+            return "mystery_redundant_constraints"
         return "mystery"
 
     def evaluate_true(self, X: Tensor) -> Tensor:
