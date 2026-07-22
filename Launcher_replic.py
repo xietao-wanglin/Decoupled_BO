@@ -44,11 +44,11 @@ def main():
     runs = [
         # (function_name, decoupled, cost)
         ("MysteryRedundant", True, None),
-        ("MysteryRedundant", False, None),
+        ("MysteryRedundant", False, None)
         # Unequal-cost decoupled experiments (cost=5 makes each source expensive in turn).
-        ("Mystery", True, 5),      # 1 constraint -> [5,1] / [1,5]
-        ("TestFunc3", True, 5),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
-        ("Branin", True, 5),       # 1 constraint -> [5,1] / [1,5]
+        # ("Mystery", True, 5),      # 1 constraint -> [5,1] / [1,5]
+        # ("TestFunc3", True, 5),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
+        # ("Branin", True, 5),       # 1 constraint -> [5,1] / [1,5]
         # ("PressureVessel", False, None),
         # ("SpeedReducer", True, None),
         # ("two_layer_cnn_discrete", True, None),
