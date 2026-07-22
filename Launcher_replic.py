@@ -43,8 +43,9 @@ def main():
 
     runs = [
         # (function_name, decoupled, cost)
-        ("MysteryRedundant", True, None),
-        ("MysteryRedundant", False, None)
+        # ("MysteryRedundant", True, None),
+        # ("MysteryRedundant", False, None)
+        ("TestFunc3RedundantNoNoise", True, None)
         # Unequal-cost decoupled experiments (cost=5 makes each source expensive in turn).
         # ("Mystery", True, 5),      # 1 constraint -> [5,1] / [1,5]
         # ("TestFunc3", True, 5),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]

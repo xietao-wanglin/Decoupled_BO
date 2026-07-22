@@ -488,18 +488,19 @@ class ConstrainedFunc3(SingleObjectiveProblem):
 class ConstrainedFunc3Redundant(HeterogeneousNoiseProblem, ConstrainedFunc3):
     """ConstrainedFunc3 extended with 2 redundant constraints and heterogeneous noise.
 
-    Exactly one active constraint (c1, c2, or c3 — chosen via `noisy_active_constraint`)
-    carries observation noise at ~20% of its signal std; the other two active constraints
-    are noiseless. Redundant constraints: c4 (noiseless, always -100), c5 (noisy,
-    always -100). Objective: always noisy (~20% of its signal std).
+    At most one active constraint (c1, c2, or c3 — chosen via `noisy_active_constraint`)
+    carries observation noise at ~20% of its signal std; the other active constraints
+    are noiseless. Pass `noisy_active_constraint=None` to keep all three active
+    constraints noiseless. Redundant constraints: c4 (noiseless, always -100), c5
+    (noisy, always -100). Objective: always noisy (~20% of its signal std).
     """
 
     # Per-active-constraint noise variance ~= (0.2 * signal_std)^2, estimated by sampling.
     _ACTIVE_NOISE_VAR = {1: 0.1642, 2: 0.3367, 3: 0.0004}
 
     def __init__(self, noise_std=0.0, negate=False, noisy_active_constraint=2):
-        assert noisy_active_constraint in (1, 2, 3), \
-            "noisy_active_constraint must be 1, 2, or 3"
+        assert noisy_active_constraint in (1, 2, 3, None), \
+            "noisy_active_constraint must be 1, 2, 3, or None"
         self.noisy_active_constraint = noisy_active_constraint
         super().__init__(noise_std=noise_std, negate=negate)
 
@@ -509,6 +510,8 @@ class ConstrainedFunc3Redundant(HeterogeneousNoiseProblem, ConstrainedFunc3):
     def get_name(self):
         if self.noisy_active_constraint == 2:
             return "test_function_3_redundant"
+        if self.noisy_active_constraint is None:
+            return "test_function_3_redundant_no_noisy_constraint"
         return f"test_function_3_redundant_c{self.noisy_active_constraint}noisy"
 
     def get_noise_per_output(self):
@@ -516,7 +519,8 @@ class ConstrainedFunc3Redundant(HeterogeneousNoiseProblem, ConstrainedFunc3):
         # float > 1e-6: noisy — obs noise STD = sqrt(v); fixed GP noise variance v
         # None:         near-deterministic — no external observation noise
         npo = [0.0038, None, None, None, None, 4.0]
-        npo[self.noisy_active_constraint] = self._ACTIVE_NOISE_VAR[self.noisy_active_constraint]
+        if self.noisy_active_constraint is not None:
+            npo[self.noisy_active_constraint] = self._ACTIVE_NOISE_VAR[self.noisy_active_constraint]
         return npo
 
     def evaluate_slack4_true(self, X: Tensor) -> Tensor:
