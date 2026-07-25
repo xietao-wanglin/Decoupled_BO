@@ -1,3 +1,4 @@
+import math
 import time
 import warnings
 from typing import Optional
@@ -19,6 +20,7 @@ from bo.acquisition_functions.acquisition_functions import (
 from bo.acquisition_functions.refactored_acquisition_functions import (
     FastConstrainedKG, AllSourcesDcKG, ObjectiveDcKG, ConstraintDcKG, CoupledCKG,
 )
+from bo.acquisition_functions.pesc import sample_constrained_optima
 from bo.device_utils import DTYPE as dtype
 from bo.model.Model import (
     ConstrainedPosteriorMean, ConstrainedDeoupledGPModelWrapper,
@@ -1585,3 +1587,199 @@ class IndependentSourcesOptimizationLoop(OptimizationLoop):
 
         end_time = time.time() - start_time
         print(f'Total time: {end_time} seconds')
+
+
+class PESC_OptimizationLoop(OptimizationLoop):
+    """Strictly decoupled PESC loop.
+
+    Each iteration samples the constrained optima x* once, optimises the PESC
+    acquisition of each source (objective + every constraint) independently, and
+    evaluates the single source maximising the cost-normalised information gain.
+    There is no coupled-evaluation fallback: even when every source value is ~0
+    the argmax source is still selected.
+    """
+
+    def __init__(self, black_box_func, model, objective, ei_type, seed, budget,
+                 performance_type, bounds, results, penalty_value=torch.tensor([0.0]),
+                 number_initial_designs=6, costs=None, num_optima_samples=10, **kwargs):
+        super().__init__(black_box_func, model, objective, ei_type, seed, budget,
+                         performance_type, bounds, results, penalty_value,
+                         number_initial_designs, costs, **kwargs)
+        self.num_optima_samples = num_optima_samples
+
+    def _grid_search(self, source_acqf, seed, grid_size=10000, chunk=256, n_spray=10,
+                     spray_std=1e-4, x_center=None, maxfev=100):
+        """Spearmint's acquisition strategy: a vectorised sweep, no gradients.
+
+        The reference PESC implementation sets ``has_gradients = False`` and does a
+        grid sweep plus "spray" points around the incumbent rather than gradient
+        optimisation.  Profiling here found ``optimize_acqf``'s ~120 gradient
+        forward/backward passes to be 91-97% of per-iteration cost.
+
+        Chunking is not optional.  The joint posterior over ``[X, vec]`` is dense and
+        O(b^2), so cost per candidate *rises* with batch size (156 us at b=256,
+        672 us at b=1024, 1.9 ms at b=3072).  Each call also carries ~24 ms of fixed
+        overhead, so chunks want to be big enough to amortise that and no bigger:
+        ~256 sits near the minimum.  A derivative-free polish is deliberately not
+        used -- at 24 ms per single-point call it would cost ~3 s, which is why the
+        local refinement is folded in as spray points instead.
+
+        Grid settings match the reference implementation's defaults:
+        ``acq_grid_size=10000``, ``num_spray=10``, ``spray_std=1e-4``.  For scale, on
+        d=2 the measured quality against L-BFGS as reference maximiser was a median
+        0.84x of the optimum at 1024 and 0.98x at 4096, so 10000 is comfortably past
+        the knee.  (Some cases exceed 1.0 -- the grid finds peaks L-BFGS misses -- so
+        this is not a one-sided sacrifice.)  A fixed grid still thins out as ``d``
+        grows; the reference has the same weakness, but on the higher-dimensional
+        problems here (SpeedReducer d=7) it is worth re-checking.
+
+        ``chunk`` is ours, not Spearmint's: they can evaluate 10000 candidates in one
+        call because each costs a couple of triangular solves against a cached
+        Cholesky, whereas our joint posterior is dense and O(b^2).
+        """
+        n_spray = 0 if x_center is None else min(n_spray, grid_size // 4)
+        X = draw_sobol_samples(bounds=self.bounds, n=grid_size - n_spray, q=1,
+                               seed=seed).to(self.bounds)
+        if n_spray:
+            c = x_center.reshape(1, 1, -1).to(self.bounds)
+            cloud = c + spray_std * torch.randn(n_spray - 1, 1, c.shape[-1]).to(self.bounds)
+            cloud = torch.max(torch.min(cloud, self.bounds[1]), self.bounds[0])
+            X = torch.cat([X, cloud, c], dim=0)
+
+        vals = []
+        with torch.no_grad():
+            for i in range(0, X.shape[0], chunk):
+                vals.append(source_acqf(X[i:i + chunk]))
+        vals = torch.nan_to_num(torch.cat(vals), nan=0.0, posinf=0.0, neginf=0.0)
+        best = int(vals.argmax())
+        x0, v0 = X[best].detach().reshape(1, -1), vals[best].detach()
+        if maxfev <= 0:
+            return x0, v0
+
+        # Reference behaviour is optimize_acq=True: a derivative-free polish from the
+        # single best grid point, nlopt LN_BOBYQA at opt_acq_tol=1e-4.  nlopt is not
+        # installed here, so scipy's Powell stands in (also derivative-free, handles
+        # box bounds).  Their maxeval is acq_grid_size=10000; at our ~24 ms per
+        # single-point call that would be four minutes per source, against
+        # microseconds for their cached-Cholesky path, so maxfev is capped instead.
+        from scipy.optimize import minimize
+        lo = self.bounds[0].detach().cpu().numpy()
+        hi = self.bounds[1].detach().cpu().numpy()
+
+        def neg(x_np):
+            xt = torch.as_tensor(x_np, dtype=self.bounds.dtype, device=self.bounds.device)
+            xt = torch.max(torch.min(xt, self.bounds[1]), self.bounds[0]).reshape(1, 1, -1)
+            with torch.no_grad():
+                v = float(source_acqf(xt).reshape(-1)[0])
+            return -v if math.isfinite(v) else 0.0
+
+        try:
+            res = minimize(neg, x0.reshape(-1).detach().cpu().numpy(), method="Powell",
+                           bounds=list(zip(lo, hi)),
+                           options={"maxfev": maxfev, "xtol": 1e-4, "ftol": 1e-4})
+            v_p = -float(res.fun)
+            if math.isfinite(v_p) and v_p > float(v0):  # never return a worse point
+                x_p = torch.as_tensor(res.x, dtype=self.bounds.dtype,
+                                      device=self.bounds.device)
+                x_p = torch.max(torch.min(x_p, self.bounds[1]), self.bounds[0])
+                return x_p.reshape(1, -1), torch.as_tensor(v_p, dtype=v0.dtype,
+                                                           device=v0.device)
+        except (RuntimeError, ValueError):
+            pass
+        return x0, v0
+
+    def _optimize_source(self, source_acqf, seed, x_center=None):
+        # The EP variant uses the grid sweep (see _grid_search); the cheap
+        # closed-form variant keeps gradient-based optimisation, where it is
+        # affordable and slightly sharper.
+        is_ep = self.acquisition_function_type == AcquisitionFunctionType.PESC_EP
+        if is_ep:
+            return self._grid_search(source_acqf, seed, x_center=x_center)
+        try:
+            candidates, value = optimize_acqf(
+                acq_function=source_acqf, bounds=self.bounds, q=1,
+                num_restarts=10, raw_samples=512,
+                options={"maxiter": 100, "seed": seed},
+            )
+            if torch.isfinite(value).all():
+                return candidates.detach(), value.detach()
+        except RuntimeError:
+            # Entropy-search acqfs can still produce NaN gradients; fall back to a
+            # gradient-free sweep.
+            pass
+        return self._grid_search(source_acqf, seed, x_center=x_center)
+
+    def run(self):
+        train_x, train_y, model, budget_consumed = self._initialize_state()
+        start_time = time.time()
+        iteration = 0
+
+        while budget_consumed < self.budget:
+            iteration += 1
+            best_observed_location, best_observed_value = self.best_observed(
+                best_value_computation_type=self.performance_type,
+                train_x=train_x, train_y=train_y, model=model, bounds=self.bounds)
+
+            x_star = sample_constrained_optima(
+                model, self.bounds, num_samples=self.num_optima_samples,
+                seed=self.seed + iteration,
+            )
+
+            # One converged EP shared by every source, as Spearmint does (its
+            # predictEP returns all task variances from a single EP solution).
+            conditioner = None
+            if self.acquisition_function_type == AcquisitionFunctionType.PESC_EP:
+                from bo.acquisition_functions.pesc_sites import PESCFaithfulConditioner
+                conditioner = PESCFaithfulConditioner(model, x_star)
+
+            info_values = torch.zeros(self.number_of_outputs, dtype=dtype)
+            new_x_list = []
+            for task_idx in range(self.number_of_outputs):
+                source_acqf = acquisition_function_factory(
+                    model=model, type=self.acquisition_function_type,
+                    objective=self.objective, best_value=best_observed_value,
+                    idx=task_idx, number_of_outputs=self.number_of_outputs,
+                    penalty_value=self.penalty_value, iteration=iteration,
+                    initial_condition_internal_optimizer=best_observed_location,
+                    x_star=x_star, conditioner=conditioner,
+                )
+                new_x, value = self._optimize_source(
+                    source_acqf, seed=iteration + task_idx * 100,
+                    x_center=best_observed_location)
+                info_values[task_idx] = value
+                new_x_list.append(new_x)
+
+            index = torch.argmax(info_values / self.costs)
+            new_x = new_x_list[index]
+            new_y = self.evaluate_black_box_func(new_x, index)
+            train_x[index] = torch.cat([train_x[index].cpu(), new_x.cpu()])
+            train_y[index] = torch.cat([train_y[index].cpu(), new_y.cpu()])
+            budget_consumed += self.costs[index]
+            model = self.update_model(X=train_x, y=train_y)
+
+            info_str = ", ".join(f"src{i}={v:.5f}" for i, v in enumerate(info_values))
+            print(
+                f"\nBatch{iteration:>2} finished: best value = "
+                f"({best_observed_value:>4.5f}), PESC values: [{info_str}], "
+                f"selected task {index}, "
+                f"best location " + str(best_observed_location.detach().cpu().numpy())
+                + " current sample decision x: " + str(new_x.detach().cpu().numpy()) + "\n",
+                end="",
+            )
+            self.save_parameters(
+                train_x=train_x, train_y=train_y,
+                model_length_scales=self.model_wrapper.get_model_length_scales(),
+                best_predicted_location=best_observed_location,
+                best_predicted_location_value=self.evaluate_location_true_quality(best_observed_location),
+                acqf_recommended_location=new_x,
+                acqf_recommended_location_true_value=(
+                    None if self.black_box_func.is_expensive()
+                    else self.evaluate_location_true_quality(new_x)
+                ),
+                acqf_recommended_output_index=[index.item()],
+                acqf_values=info_values,
+                budget_consumed=budget_consumed,
+            )
+            print(f'took {time.time() - start_time} seconds')
+
+        print(f'Total time: {time.time() - start_time} seconds')

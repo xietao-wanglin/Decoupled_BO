@@ -15,3 +15,5 @@ class BayesianOptimizationLoopType(Enum):
     CKG_V2 = auto()
     DCKG_ALL_SOURCES = auto()       # All sources in one optimize_acqf call
     DCKG_INDEPENDENT = auto()       # Each source optimised independently
+    PESC = auto()                   # Predictive Entropy Search with Constraints
+    PESC_EP = auto()                # PESC with faithful EP conditioning

@@ -216,3 +216,24 @@ class TestDecoupledAcquisitionFunctions(BotorchTestCase):
                                "number_of_initial_designs": 1,
                                "cost": None}
             run_experiment_decoupled_acquisition_functions(**experiment_args)
+
+
+class TestPESCAcquisitionFunction(BotorchTestCase):
+    """End-to-end smoke tests for the decoupled PESC loop."""
+
+    def _run(self, black_box_function):
+        run_experiment_decoupled_acquisition_functions(
+            black_box_function=black_box_function,
+            budget=2,
+            seed=0,
+            bayesian_optimization_algorithm=BayesianOptimizationLoopType.PESC,
+            number_of_initial_designs=1,
+            cost=None,
+        )
+
+    def test_mystery(self):
+        self._run(MysteryFunctionSuperRedundant(noise_std=1e-6, negate=True,
+                                                 redundant_constraints=False))
+
+    def test_TestFunc3(self):
+        self._run(ConstrainedFunc3(noise_std=1e-6, negate=True))

@@ -38,6 +38,8 @@ class AcquisitionFunctionType(Enum):
     # Refactored GPU-aware variants
     COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2 = auto()
     DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2 = auto()
+    PESC = auto()
+    PESC_EP = auto()
 
 
 def compute_best_posterior_mean(model, bounds, objective):
@@ -72,7 +74,8 @@ def sort_a_b(a, b):
 
 
 def acquisition_function_factory(type, model, objective, best_value, idx, number_of_outputs, penalty_value, iteration,
-                                 initial_condition_internal_optimizer):
+                                 initial_condition_internal_optimizer, x_star=None,
+                                 conditioner=None):
     if type is AcquisitionFunctionType.BOTORCH_EXPECTED_IMPROVEMENT:
         return ExpectedImprovement(model=model, best_f=best_value)
     elif type is AcquisitionFunctionType.BOTORCH_MC_EXPECTED_IMPROVEMENT:
@@ -149,6 +152,25 @@ def acquisition_function_factory(type, model, objective, best_value, idx, number
             return ObjectiveDcKG(**common)
         else:
             return ConstraintDcKG(constraint_index=idx - 1, **common)
+
+    elif type is AcquisitionFunctionType.PESC:
+        from bo.acquisition_functions.pesc import PESCObjective, PESCConstraint
+        if x_star is None:
+            raise ValueError("PESC requires sampled constrained optima x_star")
+        if idx == 0:
+            return PESCObjective(model, x_star=x_star, maximize=True)
+        else:
+            return PESCConstraint(model, constraint_index=idx - 1, x_star=x_star)
+
+    elif type is AcquisitionFunctionType.PESC_EP:
+        from bo.acquisition_functions.pesc_ep import PESCObjectiveEP, PESCConstraintEP
+        if x_star is None:
+            raise ValueError("PESC_EP requires sampled constrained optima x_star")
+        if idx == 0:
+            return PESCObjectiveEP(model, x_star=x_star, conditioner=conditioner)
+        else:
+            return PESCConstraintEP(model, constraint_index=idx - 1, x_star=x_star,
+                                    conditioner=conditioner)
 
     elif type is AcquisitionFunctionType.OPTIMISTIC_UCB:
         return OptimisticUpperConfidenceBound(model,

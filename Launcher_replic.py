@@ -43,16 +43,23 @@ def main():
 
     runs = [
         # (function_name, decoupled, cost)
-        # ("MysteryRedundant", True, None),
+        ("MysteryRedundant", True, None),
+        ("TestFunc3Redundant", True, None),
+        ("TestFunc3RedundantC1", True, None),
+        ("TestFunc3RedundantC3", True, None),
         # ("MysteryRedundant", False, None)
-        ("TestFunc3RedundantNoNoise", True, None)
+        # ("TestFunc3RedundantNoNoise", True, None)
         # Unequal-cost decoupled experiments (cost=5 makes each source expensive in turn).
-        # ("Mystery", True, 5),      # 1 constraint -> [5,1] / [1,5]
-        # ("TestFunc3", True, 5),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
-        # ("Branin", True, 5),       # 1 constraint -> [5,1] / [1,5]
-        # ("PressureVessel", False, None),
-        # ("SpeedReducer", True, None),
-        # ("two_layer_cnn_discrete", True, None),
+        ("Mystery", True, None),  # 1 constraint -> [5,1] / [1,5]
+        ("TestFunc3", True, None),  # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
+        ("Branin", True, None),  # 1 constraint -> [5,1] / [1,5]
+        ("Mystery", True, 5),      # 1 constraint -> [5,1] / [1,5]
+        ("TestFunc3", True, 5),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
+        ("Branin", True, 5),       # 1 constraint -> [5,1] / [1,5]
+        ("PressureVessel", True, None),
+        ("SpeedReducer", True, None),
+        ("two_layer_cnn_discrete", True, None),
+        ("bolt_dmo_10", True, None)
         # ("WeldedBeam", True, None),
         # ("TensionCompression", True, None),
     ]
