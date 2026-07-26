@@ -1,159 +1,214 @@
-"""Timing study for acquisition-function forward evaluation.
+"""CPU timing benchmark for the dcKG and cEI acquisitions on the Mystery benchmark.
 
-Measures the wall-clock time of a single forward pass of the acquisition
-function for DCKG_INDEPENDENT, CKG_V2 and CEI, on CPU or GPU, as a function of
-the data budget (number of training points per GP) and of the acquisition
-function's complexity knobs: the domain discretisation size (``--n-disc``), the
-fantasy-sample count (``--n-fantasies``) and the constraint-sample count used by
-the coupled cKG source (``--n-constraint-samples``). The complexity knobs are
-swept one at a time around a fixed baseline (see the ``BASELINE_*`` constants);
-cEI has no such knobs and is timed once per data budget.
+Measures three quantities as a function of the training-set size ``n_train``
+(the same number of observations is used for the objective GP and for the
+constraint GP):
 
-Each run fits fresh GPs on a Latin-Hypercube design of ``n_train`` points per
-output and computes the recommended location (untimed pre-steps, recorded in
-separate columns), constructs the acquisition function, then times ``acqf(X)``
-under ``torch.no_grad()`` on random candidate batches. Two forward metrics are
-recorded, because they scale very differently with the data budget:
+1. **Steady-state forward evaluation** of each acquisition (``acqf(X)`` under
+   ``no_grad`` after warm-up forwards have built the GP posterior caches).
+2. **Complete acquisition optimisation** of each acquisition separately: one
+   timer around the production optimisation call, which covers raw-sample
+   generation, restart initialisation, the adaptive discretisation, every
+   forward/backward pass of every L-BFGS-B restart, and the selection of the
+   best candidate. GP fitting and acquisition-object construction happen before
+   the timer starts and are excluded.
+3. **One complete sequential BO iteration**, measured with a single outer
+   wall-clock timer -- separately for the decoupled dcKG algorithm and for the
+   coupled cEI baseline. The dcKG iteration covers GP fitting, acquisition
+   construction, sequential optimisation of the three dcKG acquisitions, cost
+   normalisation and source selection (including the delta feasibility rule for
+   the coupled proposal), evaluation of the selected Mystery source(s), and the
+   dataset update. The cEI iteration covers GP fitting, acquisition
+   construction, optimisation, the coupled evaluation of every output, and the
+   dataset update. Neither total is reconstructed by summing component medians.
 
-  - ``acqf_first_forward_time_s``: the FIRST forward after a model update,
-    which builds the GP posterior caches (O(n^3)); the BO loop pays this once
-    per iteration after refitting. This is where n_train scaling shows.
-  - ``acqf_forward_time_s``: steady-state forward reusing the caches, averaged
-    over ``--forwards-per-run`` calls (after 2 untimed warm-up forwards).
+Mystery has K = 1 constraint, so ``AllSourcesDcKG.sources`` is exactly
+``[ObjectiveDcKG, ConstraintDcKG(0), CoupledCKG]`` -- the three acquisitions
+named ``dckg_objective``, ``dckg_constraint`` and ``coupled_ckg``. ``cei`` is
+the coupled constrained-EI baseline, which is optimised on a single candidate
+(q = 1) rather than on a candidate plus discretisation (q = 65).
 
-For large ``--n-train`` use ``--no-fit`` to skip GP hyperparameter
-optimisation (the forward cost does not depend on the hyperparameter values).
-
-Input shapes match how each acquisition is evaluated during optimisation:
-  - CEI:              X of shape (batch, 1, d)
-  - CKG_V2:           X of shape (batch, 1 + n_disc, d)  (candidate + discretisation)
-  - DCKG_INDEPENDENT: one forward per source (K+2 sources), each on
-                      (batch, 1 + n_disc, d); ``acqf_forward_time_s`` is their sum
-                      and per-source times are recorded separately.
+Everything runs on CPU with the production acquisition implementations and
+their default settings (see the ``PROD_*`` constants, which mirror
+``IndependentSourcesOptimizationLoop.run`` and ``EI_OptimizationLoop.run`` in
+``bo/bo_loops/bo_loop.py``).
 
 Usage:
-    python Launcher_timing.py --function Mystery --device cpu
-    python Launcher_timing.py --function Mystery --device cuda
+    python Launcher_timing.py                # full benchmark
+    python Launcher_timing.py --smoke-test   # minimal end-to-end check
 
-Output: one CSV row per (algorithm, n_train, seed) appended to
-``results/timing_study/timing_<function>_<device>.csv`` (plus a .pkl with the
-same records). Aggregate with ``python timing_table.py``.
+Outputs (in ``results/timing_study/``): ``mystery_forward_raw.csv``,
+``mystery_forward_summary.csv``, ``mystery_opt_raw.csv``,
+``mystery_opt_summary.csv``, ``mystery_bo_loop_raw.csv``,
+``mystery_bo_loop_summary.csv``, ``mystery_cei_loop_raw.csv``,
+``mystery_cei_loop_summary.csv`` and ``mystery_timing_metadata.json``.
+Render the paper table with ``python timing_table.py``.
 """
+import os
+
+# CPU-only benchmark. This must run before torch (and any bo module) is
+# imported: bo.device_utils resolves DEVICE at import time.
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
 import argparse
 import csv
+import json
 import logging
-import os
-import pickle
-import sys
+import statistics
 import time
+import traceback
 from datetime import datetime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-ALGORITHMS = ["DCKG_INDEPENDENT", "CKG_V2", "CEI"]
+BENCHMARK = "Mystery"
+DEVICE_NAME = "cpu"
 
-FUNCTIONS = ["Mystery", "MysteryRedundant", "Branin", "TestFunc3", "WeldedBeam",
-             "BraninHoo", "BraninHoo2", "BraninHoo3", "TensionCompression",
-             "PressureVessel", "SpeedReducer"]
+N_TRAIN_VALUES = [10, 40, 160, 300]
 
-CSV_COLUMNS = ["function", "algorithm", "device", "device_name", "n_train",
-               "n_disc", "n_fantasies", "n_constraint_samples", "seed",
-               "warmup", "dim", "n_constraints", "forward_batch_size", "q_per_forward",
-               "forwards_per_run", "hyperparams_fitted",
-               "fit_time_s", "recommendation_time_s", "acqf_construction_time_s",
-               "acqf_forward_time_s",
-               "dckg_single_source_forward_time_s", "dckg_coupled_forward_time_s",
-               "per_source_forward_times_s",
-               "acqf_first_forward_time_s",
-               "dckg_single_source_first_forward_time_s", "dckg_coupled_first_forward_time_s",
-               "per_source_first_forward_times_s",
-               "torch_version", "timestamp"]
+# Order matches AllSourcesDcKG.sources for a single-constraint problem:
+# [ObjectiveDcKG, ConstraintDcKG(0), CoupledCKG].
+DCKG_ACQUISITIONS = ["dckg_objective", "dckg_constraint", "coupled_ckg"]
+CEI = "cei"
+ACQUISITIONS = DCKG_ACQUISITIONS + [CEI]
 
-# Baseline acquisition-function complexity knobs. When a sweep varies one axis
-# (--n-disc / --n-fantasies / --n-constraint-samples), the other two are held at
-# these values. The discretisation baseline matches the q = 1 + N_DISC the V2 KG
-# optimisers use per forward (see _optimize_fast_ckg / _optimize_single_source in
-# bo/bo_loops/bo_loop.py); the sample baselines match the production loop classes.
-BASELINE_N_DISC = 64
-BASELINE_N_FANTASIES = 7
-BASELINE_N_CONSTRAINT_SAMPLES = 5
+# Production settings of the dcKG loop (IndependentSourcesOptimizationLoop.run).
+PROD_N_FANTASIES = 7             # bo_loop.py:1496
+PROD_N_CONSTRAINT_SAMPLES = 5    # bo_loop.py:1497
+PROD_N_DISC_ACQF = 128           # bo_loop.py:1498 (acquisition construction)
+PROD_N_DISC_OPT = 64             # bo_loop.py:1442 (what the optimiser actually uses)
+PROD_Q = 1 + PROD_N_DISC_OPT     # candidate + discretisation slots per forward
+PROD_NUM_RESTARTS = 15           # bo_loop.py:1510
+PROD_RAW_SAMPLES = 72            # bo_loop.py:1510
+PROD_INFEASIBILITY_THRESHOLD = 1e-7  # delta in compute_important_idxs, bo_loop.py:251
+
+# Production settings of the cEI loop (EI_OptimizationLoop.compute_next_sample).
+PROD_CEI_Q = 1                   # bo_loop.py:976
+PROD_CEI_NUM_RESTARTS = 15       # bo_loop.py:977
+PROD_CEI_RAW_SAMPLES = 72        # bo_loop.py:978
+
+# cEI evaluates a single candidate; the dcKG acquisitions evaluate a candidate
+# plus a 64-point discretisation. Per-call forward times are not like-for-like.
+ACQUISITION_Q = {name: PROD_Q for name in DCKG_ACQUISITIONS}
+ACQUISITION_Q[CEI] = PROD_CEI_Q
+
+WARMUP_SEED_OFFSET = 10_000
+
+FORWARD_COLUMNS = ["benchmark", "device", "dtype", "threads", "n_train", "acquisition",
+                   "repeat", "seed", "q", "forward_seconds",
+                   "status", "error_type", "error_message"]
+
+OPT_COLUMNS = ["benchmark", "device", "dtype", "threads", "n_train", "acquisition",
+               "repeat", "seed", "opt_seed", "optimise_seconds", "acquisition_value",
+               "status", "error_type", "error_message"]
+
+LOOP_COLUMNS = ["benchmark", "device", "dtype", "threads", "n_train", "repeat", "seed",
+                "fit_models_seconds", "construct_acquisitions_seconds",
+                "optimise_dckg_objective_seconds", "optimise_dckg_constraint_seconds",
+                "optimise_coupled_ckg_seconds", "select_action_seconds",
+                "evaluate_sources_seconds", "update_datasets_seconds",
+                "total_loop_seconds",
+                "selected_action", "selected_location", "selected_sources",
+                "objective_acquisition_value", "constraint_acquisition_value",
+                "coupled_acquisition_value",
+                "n_objective_before", "n_constraint_before",
+                "n_objective_after", "n_constraint_after",
+                "status", "error_type", "error_message"]
+
+CEI_LOOP_COLUMNS = ["benchmark", "device", "dtype", "threads", "n_train", "repeat", "seed",
+                    "fit_models_seconds", "construct_acquisition_seconds",
+                    "optimise_cei_seconds", "evaluate_sources_seconds",
+                    "update_datasets_seconds", "total_loop_seconds",
+                    "selected_location", "selected_sources", "cei_acquisition_value",
+                    "n_objective_before", "n_constraint_before",
+                    "n_objective_after", "n_constraint_after",
+                    "status", "error_type", "error_message"]
+
+LOOP_DEFINITION = (
+    "fit the objective and constraint GPs -> recommend x_best -> construct dckg_objective, "
+    "dckg_constraint and coupled_ckg -> optimise them sequentially in that order -> cost "
+    "normalisation, delta feasibility rule and source selection -> evaluate the selected "
+    "Mystery source(s) at the selected location -> append the observation(s) to the "
+    "corresponding dataset(s)"
+)
+
+CEI_LOOP_DEFINITION = (
+    "fit the objective and constraint GPs -> recommend x_best (supplies the incumbent value) -> "
+    "construct the constrained EI acquisition -> optimise it (production two-stage "
+    "optimize_acqf: raw-sample restarts plus the smart-initialisation restart, best of the two) "
+    "-> evaluate every Mystery output at the selected location (coupled) -> append one "
+    "observation to every dataset"
+)
+
+GP_REFIT_STRATEGY = "refit_from_scratch"
+GP_REFIT_STRATEGY_DETAIL = (
+    "ConstrainedDeoupledGPModelWrapper.fit builds new SingleTaskGP objects on every call "
+    "(bo/model/Model.py:338-360) and optimize() runs fit_gpytorch_mll on a fresh "
+    "SumMarginalLogLikelihood (bo/model/Model.py:362-367): the hyperparameters are re-optimised "
+    "from their default initialisation every iteration, with no warm start and no cache-only "
+    "posterior refresh. This holds for both the dcKG and the cEI loop."
+)
+
+RECOMMENDATION_STEP = (
+    "compute_best_posterior_mean (optimize_acqf with num_restarts=20, raw_samples=2048) is "
+    "required to build the acquisitions -- it supplies x_best for dcKG and the incumbent value "
+    "for cEI. It runs inside the outer loop timer and its duration is attributed to "
+    "construct_acquisitions_seconds (dcKG) / construct_acquisition_seconds (cEI)."
+)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Acquisition-function timing study (CPU/GPU).")
-    parser.add_argument("--function", type=str, choices=FUNCTIONS, default="Mystery",
-                        help="Black-box benchmark (default: Mystery)")
-    parser.add_argument("--device", type=str, choices=["cpu", "cuda"], required=True,
-                        help="Device to run on. 'cpu' hides CUDA from the whole process.")
-    parser.add_argument("--algorithms", type=str, nargs="+", choices=ALGORITHMS,
-                        default=ALGORITHMS,
-                        help="Algorithms to time (default: all three)")
-    parser.add_argument("--n-train", type=int, nargs="+", default=[10, 40, 160, 640, 1280],
-                        help="Data budgets: training points per GP (default: 10 40 160 640 1280)")
-    parser.add_argument("--n-disc", type=int, nargs="+", default=[32, 64, 128],
-                        help="Discretisation sizes to sweep for the KG methods; the candidate "
-                             "tensor has q = 1 + n_disc (default: 32 64 128). Ignored by cEI.")
-    parser.add_argument("--n-fantasies", type=int, nargs="+", default=[3, 7, 15],
-                        help="Fantasy (Z_y) sample counts to sweep for the KG methods "
-                             "(default: 3 7 15). Ignored by cEI.")
-    parser.add_argument("--n-constraint-samples", type=int, nargs="+", default=[3, 5, 10],
-                        help="Constraint (Z_c) sample counts to sweep; only the coupled cKG "
-                             "source uses these (default: 3 5 10). Ignored by cEI.")
-    parser.add_argument("--min-seed", type=int, default=0, help="Minimum seed (default: 0)")
-    parser.add_argument("--max-seed", type=int, default=9, help="Maximum seed, inclusive (default: 9)")
-    parser.add_argument("--warmup", type=int, default=1,
-                        help="Warm-up runs per algorithm, flagged warmup=1 in the CSV (default: 1)")
-    parser.add_argument("--forward-batch-size", type=int, default=1,
-                        help="Batch dimension of the candidate tensor passed to each forward (default: 1)")
-    parser.add_argument("--forwards-per-run", type=int, default=10,
-                        help="Timed forward calls per run; the recorded time is their mean (default: 10)")
-    parser.add_argument("--no-fit", action="store_true",
-                        help="Skip GP hyperparameter optimisation (L-BFGS). Forward cost does not "
-                             "depend on hyperparameter values, and fitting dominates runtime for "
-                             "large --n-train; recommended for n >= 1280.")
+    parser = argparse.ArgumentParser(
+        description="CPU timing benchmark for the dcKG and cEI acquisitions on Mystery.")
+    parser.add_argument("--n-train", type=int, nargs="+", default=N_TRAIN_VALUES,
+                        help=f"Training-set sizes per GP (default: {N_TRAIN_VALUES})")
+    parser.add_argument("--forward-warmups", type=int, default=3,
+                        help="Untimed forward calls per acquisition (default: 3)")
+    parser.add_argument("--forward-repeats", type=int, default=20,
+                        help="Timed forward calls per acquisition (default: 20)")
+    parser.add_argument("--opt-warmups", type=int, default=1,
+                        help="Untimed acquisition optimisations per acquisition (default: 1)")
+    parser.add_argument("--opt-repeats", type=int, default=10,
+                        help="Timed acquisition optimisations per acquisition (default: 10)")
+    parser.add_argument("--loop-warmups", type=int, default=3,
+                        help="Untimed sequential BO iterations, per algorithm (default: 3)")
+    parser.add_argument("--loop-repeats", type=int, default=10,
+                        help="Timed sequential BO iterations, per algorithm (default: 10)")
+    parser.add_argument("--data-seed", type=int, default=0,
+                        help="Seed of the fixed base dataset (default: 0)")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="Base optimisation seed; repetition r uses seed + r (default: 0)")
+    parser.add_argument("--threads", type=int, default=None,
+                        help="torch.set_num_threads value (default: leave the torch default)")
+    parser.add_argument("--smoke-test", action="store_true",
+                        help="Minimal end-to-end run: n_train=10, 1 forward warm-up + 2 timed "
+                             "forwards, 1 optimisation, 1 loop warm-up + 1 timed loop.")
     parser.add_argument("--output-dir", type=str, default=os.path.join("results", "timing_study"),
                         help="Output directory (default: results/timing_study)")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.smoke_test:
+        args.n_train = [10]
+        args.forward_warmups, args.forward_repeats = 1, 2
+        args.opt_warmups, args.opt_repeats = 0, 1
+        args.loop_warmups, args.loop_repeats = 1, 1
+    return args
 
 
-def make_black_box(name):
-    from bo.synthetic_test_functions.synthetic_test_functions import (
-        ConstrainedFunc3, ConstrainedBraninNew, MysteryFunctionSuperRedundant, WeldedBeamSO,
-        PressureVessel, TensionCompression, SpeedReducer, BraninHoo, BraninHoo2, BraninHoo3,
-    )
-    if name == "Mystery":
-        return MysteryFunctionSuperRedundant(noise_std=1e-6, negate=True, redundant_constraints=False)
-    if name == "MysteryRedundant":
-        return MysteryFunctionSuperRedundant(noise_std=1e-6, negate=True, redundant_constraints=True)
-    if name == "Branin":
-        return ConstrainedBraninNew(noise_std=1e-6, negate=True)
-    if name == "TestFunc3":
-        return ConstrainedFunc3(noise_std=1e-6, negate=True)
-    if name == "WeldedBeam":
-        return WeldedBeamSO(noise_std=1e-6, negate=True)
-    if name == "BraninHoo":
-        return BraninHoo(noise_std=1e-2, negate=True)
-    if name == "BraninHoo2":
-        return BraninHoo2(noise_std=1e-2, negate=True)
-    if name == "BraninHoo3":
-        return BraninHoo3(noise_std=1e-2, negate=True)
-    if name == "TensionCompression":
-        return TensionCompression(noise_std=1e-6, negate=True)
-    if name == "PressureVessel":
-        return PressureVessel(noise_std=1e-6, negate=True)
-    if name == "SpeedReducer":
-        return SpeedReducer(noise_std=1e-6, negate=True)
-    raise ValueError(f"Function {name} is not supported.")
+# ----------------------------------------------------------------------------
+# Production objects
+# ----------------------------------------------------------------------------
+
+def make_mystery():
+    from bo.synthetic_test_functions.synthetic_test_functions import MysteryFunctionSuperRedundant
+    return MysteryFunctionSuperRedundant(noise_std=1e-6, negate=True, redundant_constraints=False)
 
 
-def make_loop(algorithm, black_box_function, seed):
-    """Build the same loop object BayesianOptimizationLoopFactory.create() would,
-    without touching any results files on disk."""
+def _make_loop(loop_class, ei_type, black_box_function, seed):
+    """Build the loop object BayesianOptimizationLoopFactory.create() would build,
+    without touching any results file on disk. ``run()`` is never called."""
     import torch
     from botorch.acquisition import ConstrainedMCObjective
 
-    from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType
-    from bo.bo_loops.bo_loop import EI_OptimizationLoop, IndependentSourcesOptimizationLoop
     from bo.device_utils import DEVICE as device, DTYPE as dtype
     from bo.model.Model import (ConstrainedDeoupledGPModelWrapper, obj_callable,
                                 constraint_callable_wrapper)
@@ -166,18 +221,18 @@ def make_loop(algorithm, black_box_function, seed):
         objective=obj_callable,
         constraints=[constraint_callable_wrapper(idx) for idx in range(1, number_of_constraints + 1)],
     )
-    dim = black_box_function.dim
-    bounds = torch.zeros(2, dim, device=device, dtype=dtype)
+    bounds = torch.zeros(2, black_box_function.dim, device=device, dtype=dtype)
     bounds[1] = 1.0
     # Same double-wrapping as Launcher.py -> BayesianOptimizationLoopFactory.create()
     penalty_value = torch.tensor([torch.tensor([black_box_function.get_penalty()])])
 
-    common = dict(
+    return loop_class(
         black_box_func=black_box_function,
         objective=constrained_obj,
         bounds=bounds,
         performance_type="model",
         model=model,
+        ei_type=ei_type,
         seed=seed,
         budget=1,  # never used: we do not call run()
         number_initial_designs=6,
@@ -185,276 +240,625 @@ def make_loop(algorithm, black_box_function, seed):
         costs=torch.ones(number_of_constraints + 1),
         penalty_value=penalty_value,
     )
-    if algorithm == "CEI":
-        return EI_OptimizationLoop(ei_type=AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
-                                   **common)
-    if algorithm == "CKG_V2":
-        return EI_OptimizationLoop(ei_type=AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
-                                   **common)
-    if algorithm == "DCKG_INDEPENDENT":
-        return IndependentSourcesOptimizationLoop(
-            ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2, **common)
-    raise ValueError(f"Algorithm {algorithm} is not supported.")
 
 
-def _sync():
-    import torch
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+def make_loop(black_box_function, seed):
+    """The production decoupled dcKG loop (DCKG_INDEPENDENT)."""
+    from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType
+    from bo.bo_loops.bo_loop import IndependentSourcesOptimizationLoop
+    return _make_loop(IndependentSourcesOptimizationLoop,
+                      AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
+                      black_box_function, seed)
 
 
-def _candidate_batch(dim, q, batch_size):
-    """Random candidate tensor of shape (batch_size, q, d) on DEVICE."""
-    import torch
-    from bo.device_utils import DEVICE, DTYPE
-    return torch.rand(batch_size, q, dim, device=DEVICE, dtype=DTYPE)
+def make_cei_loop(black_box_function, seed):
+    """The production coupled cEI loop (CEI)."""
+    from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionType
+    from bo.bo_loops.bo_loop import EI_OptimizationLoop
+    return _make_loop(EI_OptimizationLoop,
+                      AcquisitionFunctionType.BOTORCH_CONSTRAINED_EXPECTED_IMPROVEMENT,
+                      black_box_function, seed)
 
 
-def time_forward(acquisition_function, X, n_forwards):
-    """Mean wall-clock time of one steady-state acqf(X) forward under no_grad.
-
-    Two untimed warm-up forwards absorb lazy posterior caches / CUDA kernel
-    compilation before the timed loop.
-    """
-    import torch
-    with torch.no_grad():
-        for _ in range(2):
-            acquisition_function(X)
-        _sync()
-        t0 = time.perf_counter()
-        for _ in range(n_forwards):
-            acquisition_function(X)
-        _sync()
-    return (time.perf_counter() - t0) / n_forwards
+def make_base_state(loop, n_train):
+    """Fixed base datasets: n_train observations for the objective and for each
+    constraint. Always built outside every timer."""
+    return loop.generate_initial_data(n=n_train)
 
 
-def _clear_posterior_caches(model):
-    """Reset gpytorch prediction caches, as happens after every model refit."""
-    model.train()
-    model.eval()
-
-
-N_COLD_REPS = 3
-
-
-def time_first_forward(acquisition_function, model, X):
-    """Mean wall-clock time of the FIRST acqf(X) forward after a model update.
-
-    This includes building the GP posterior caches (O(n^3) in the training-set
-    size), which the BO loop pays once per iteration after refitting the model.
-    Steady-state forwards (time_forward) reuse those caches and only show the
-    O(n)/O(n^2) per-query cost.
-    """
-    import torch
-    total = 0.0
-    with torch.no_grad():
-        for _ in range(N_COLD_REPS):
-            _clear_posterior_caches(model)
-            _sync()
-            t0 = time.perf_counter()
-            acquisition_function(X)
-            _sync()
-            total += time.perf_counter() - t0
-    return total / N_COLD_REPS
-
-
-def time_coupled_forward(loop, model, best_observed_location, best_observed_value, iteration,
-                         batch_size, n_forwards, n_disc, n_fantasies, n_constraint_samples):
-    """Forward-pass time for CEI (q=1) and CKG_V2 (q=1+n_disc).
-
-    CKG_V2 is a coupled cKG, so its ``CoupledCKG`` is constructed here directly
-    (rather than via acquisition_function_factory, which hardcodes the sample
-    counts) so ``n_fantasies`` and ``n_constraint_samples`` can be swept.
-    """
-    from bo.acquisition_functions.acquisition_functions import (
-        AcquisitionFunctionType, acquisition_function_factory)
-    from bo.acquisition_functions.refactored_acquisition_functions import (
-        CoupledCKG, FastConstrainedKG)
-
-    is_ckg_v2 = (loop.acquisition_function_type
-                 is AcquisitionFunctionType.COUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2)
-
-    _sync()
-    t0 = time.perf_counter()
-    if is_ckg_v2:
-        acquisition_function = CoupledCKG(
-            model,
-            penalty_value=loop.penalty_value,
-            x_best_location=best_observed_location,
-            objective=loop.objective,
-            n_fantasies=n_fantasies,
-            n_constraint_samples=n_constraint_samples,
-            seed=iteration)
-    else:
-        acquisition_function = acquisition_function_factory(
-            model=model,
-            type=loop.acquisition_function_type,
-            objective=loop.objective,
-            best_value=best_observed_value,
-            idx=1,
-            number_of_outputs=loop.number_of_outputs,
-            penalty_value=loop.penalty_value,
-            iteration=iteration,
-            initial_condition_internal_optimizer=best_observed_location)
-    _sync()
-    construction_time = time.perf_counter() - t0
-
-    q = 1 + n_disc if isinstance(acquisition_function, FastConstrainedKG) else 1
-    X = _candidate_batch(loop.dim_x, q, batch_size)
-    first_forward_time = time_first_forward(acquisition_function, model, X)
-    forward_time = time_forward(acquisition_function, X, n_forwards)
-    return {
-        "construction_time": construction_time,
-        "forward_time": forward_time,
-        "first_forward_time": first_forward_time,
-        "q": q,
-        "per_source_times": [],
-        "per_source_first_times": [],
-    }
-
-
-def time_dckg_forward(loop, model, best_observed_location, iteration, batch_size, n_forwards,
-                      n_disc, n_fantasies, n_constraint_samples):
-    """Per-source forward-pass times for dcKG (IndependentSourcesOptimizationLoop).
-
-    AllSourcesDcKG holds K+2 sources: objective dcKG, K constraint dcKGs, and
-    the full coupled cKG as the last source. Each is timed on its own
-    (batch, 1+n_disc, d) candidate tensor. Returns the total (sum over
-    sources) plus the per-source breakdown, from which the single-source and
-    coupled-cKG columns are derived.
-    """
+def build_acquisitions(loop, model, seed):
+    """Production dcKG acquisition construction: recommend x_best, then build the
+    K+2 sources (objective dcKG, constraint dcKG, coupled cKG)."""
     from bo.acquisition_functions.refactored_acquisition_functions import AllSourcesDcKG
 
-    _sync()
-    t0 = time.perf_counter()
+    x_best, _ = loop.best_observed(
+        best_value_computation_type=loop.performance_type,
+        train_x=None, train_y=None, model=model, bounds=loop.bounds)
     all_dckg = AllSourcesDcKG(
         model,
         penalty_value=loop.penalty_value,
-        x_best_location=best_observed_location,
+        x_best_location=x_best,
         objective=loop.objective,
-        n_fantasies=n_fantasies,
-        n_constraint_samples=n_constraint_samples,
-        n_disc=n_disc,
-        seed=iteration,
+        n_fantasies=PROD_N_FANTASIES,
+        n_constraint_samples=PROD_N_CONSTRAINT_SAMPLES,
+        n_disc=PROD_N_DISC_ACQF,
+        seed=seed,
     )
-    _sync()
-    construction_time = time.perf_counter() - t0
-
-    q = 1 + n_disc
-    per_source_times = []
-    per_source_first_times = []
-    for source_acqf in all_dckg.sources:
-        X = _candidate_batch(loop.dim_x, q, batch_size)
-        per_source_first_times.append(time_first_forward(source_acqf, model, X))
-        per_source_times.append(time_forward(source_acqf, X, n_forwards))
-    return {
-        "construction_time": construction_time,
-        "forward_time": sum(per_source_times),
-        "first_forward_time": sum(per_source_first_times),
-        "q": q,
-        "per_source_times": per_source_times,
-        "per_source_first_times": per_source_first_times,
-    }
+    return x_best, all_dckg
 
 
-def _build_model(loop, train_x, train_y, no_fit):
-    """Fit the GPs. With no_fit, skip hyperparameter optimisation (the forward
-    cost does not depend on hyperparameter values) but keep the same copula
-    transform and device placement as loop.update_model."""
-    from bo.device_utils import DEVICE
-    from bo.model.Model import gaussian_copula_transform
+def build_cei_acquisition(loop, model, iteration):
+    """Production cEI acquisition construction: recommend x_best (which supplies
+    the incumbent value), then build the acquisition (bo_loop.py:879-895)."""
+    from bo.acquisition_functions.acquisition_functions import acquisition_function_factory
 
-    if not no_fit:
-        return loop.update_model(train_x, train_y)
-    y = train_y
-    if loop.black_box_func.get_objective_transform() is not None:
-        y = list(y)
-        y[0] = gaussian_copula_transform(y[0])
-    loop.model_wrapper.fit(train_x, y)
-    loop.model_wrapper.to_device(DEVICE)
-    return loop.model_wrapper.model
+    x_best, best_value = loop.best_observed(
+        best_value_computation_type=loop.performance_type,
+        train_x=None, train_y=None, model=model, bounds=loop.bounds)
+    acquisition_function = acquisition_function_factory(
+        model=model,
+        type=loop.acquisition_function_type,
+        objective=loop.objective,
+        best_value=best_value,
+        idx=1,
+        number_of_outputs=loop.number_of_outputs,
+        penalty_value=loop.penalty_value,
+        iteration=iteration,
+        initial_condition_internal_optimizer=x_best)
+    return x_best, acquisition_function
 
 
-def run_once(algorithm, black_box_function, n_train, seed, batch_size, n_forwards, no_fit,
-             n_disc, n_fantasies, n_constraint_samples):
-    """One timing run: data generation, GP fit, recommendation, acqf forward timing.
+def optimise_cei(loop, model, acquisition_function, x_best):
+    """The complete production cEI optimisation (bo_loop.py:896-898): smart
+    restart initialisation followed by the two-stage optimize_acqf, returning the
+    better of the raw-sample restarts and the smart-initialisation restart."""
+    initialization = loop.get_smart_initialization(acquisition_function, model, x_best)
+    return loop.compute_next_sample(acquisition_function=acquisition_function,
+                                    smart_initial_locations=initialization)
 
-    ``n_disc``/``n_fantasies``/``n_constraint_samples`` are the acquisition-function
-    complexity knobs; they are ignored for CEI (which has no discretisation).
-    """
+
+def prepare_state(black_box_function, n_train, seed):
+    """Untimed prelude shared by the forward and optimisation measurements:
+    fixed dataset -> fitted GPs -> constructed acquisitions."""
     from Launcher import set_all_seeds
 
     set_all_seeds(seed)
-    loop = make_loop(algorithm, black_box_function, seed)
-
-    train_x, train_y = loop.generate_initial_data(n=n_train)
-
-    _sync()
-    t0 = time.perf_counter()
-    model = _build_model(loop, train_x, train_y, no_fit)
-    _sync()
-    fit_time = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    best_observed_location, best_observed_value = loop.best_observed(
-        best_value_computation_type=loop.performance_type,
-        train_x=train_x, train_y=train_y, model=model, bounds=loop.bounds)
-    _sync()
-    recommendation_time = time.perf_counter() - t0
-
-    if algorithm == "DCKG_INDEPENDENT":
-        timings = time_dckg_forward(
-            loop, model, best_observed_location, iteration=seed,
-            batch_size=batch_size, n_forwards=n_forwards,
-            n_disc=n_disc, n_fantasies=n_fantasies,
-            n_constraint_samples=n_constraint_samples)
-    else:
-        timings = time_coupled_forward(
-            loop, model, best_observed_location, best_observed_value, iteration=seed,
-            batch_size=batch_size, n_forwards=n_forwards,
-            n_disc=n_disc, n_fantasies=n_fantasies,
-            n_constraint_samples=n_constraint_samples)
-
-    return {
-        "fit_time_s": fit_time,
-        "recommendation_time_s": recommendation_time,
-        "acqf_construction_time_s": timings["construction_time"],
-        "acqf_forward_time_s": timings["forward_time"],
-        "acqf_first_forward_time_s": timings["first_forward_time"],
-        "q_per_forward": timings["q"],
-        "per_source_times": timings["per_source_times"],
-        "per_source_first_times": timings["per_source_first_times"],
-    }
+    loop = make_loop(black_box_function, seed)
+    train_x, train_y = make_base_state(loop, n_train)
+    model = loop.update_model(X=train_x, y=train_y)
+    _, all_dckg = build_acquisitions(loop, model, seed)
+    return loop, model, all_dckg
 
 
-def _knob_points(algorithm, n_disc_grid, n_fantasies_grid, n_constraint_grid):
-    """(n_disc, n_fantasies, n_constraint_samples) points to time for one algorithm.
+def prepare_cei_state(black_box_function, n_train, seed):
+    """Untimed prelude for the cEI forward and optimisation measurements."""
+    from Launcher import set_all_seeds
 
-    cEI has no complexity knobs, so it gets a single ``(None, None, None)`` point.
-    The KG methods sweep one knob at a time around the baseline (disc, then
-    fantasy, then constraint); the shared baseline point is emitted only once.
+    set_all_seeds(seed)
+    loop = make_cei_loop(black_box_function, seed)
+    train_x, train_y = make_base_state(loop, n_train)
+    model = loop.update_model(X=train_x, y=train_y)
+    x_best, acquisition_function = build_cei_acquisition(loop, model, iteration=seed)
+    return loop, model, x_best, acquisition_function
+
+
+# ----------------------------------------------------------------------------
+# Measurement 1: steady-state forward evaluation
+# ----------------------------------------------------------------------------
+
+def _time_forwards(acquisition_function, X, warmups, repeats):
+    """Individually timed steady-state forwards, after untimed warm-ups."""
+    import torch
+    elapsed = []
+    with torch.no_grad():
+        for _ in range(warmups):
+            acquisition_function(X)
+        for _ in range(repeats):
+            t0 = time.perf_counter()
+            acquisition_function(X)
+            elapsed.append(time.perf_counter() - t0)
+    return elapsed
+
+
+def measure_forward(black_box_function, n_train, args, base_record):
+    """One timed row per (acquisition, repeat): a single steady-state acqf(X).
+
+    The dcKG acquisitions are evaluated on their production candidate tensor
+    (q = 65: candidate + discretisation); cEI on its production q = 1.
     """
-    if algorithm == "CEI":
-        return [(None, None, None)]
-    sweep = ([(nd, BASELINE_N_FANTASIES, BASELINE_N_CONSTRAINT_SAMPLES) for nd in n_disc_grid]
-             + [(BASELINE_N_DISC, nf, BASELINE_N_CONSTRAINT_SAMPLES) for nf in n_fantasies_grid]
-             + [(BASELINE_N_DISC, BASELINE_N_FANTASIES, nc) for nc in n_constraint_grid])
-    ordered, seen = [], set()
-    for point in sweep:
-        if point not in seen:
-            seen.add(point)
-            ordered.append(point)
-    return ordered
+    import torch
+    from bo.device_utils import DEVICE, DTYPE
+
+    rows = []
+
+    def _row(name, repeat, **fields):
+        return dict(base_record, n_train=n_train, acquisition=name, repeat=repeat,
+                    seed=args.seed, q=ACQUISITION_Q[name], **fields)
+
+    # --- dcKG sources -------------------------------------------------------
+    try:
+        loop, _, all_dckg = prepare_state(black_box_function, n_train, args.seed)
+        named_acquisitions = list(zip(DCKG_ACQUISITIONS, all_dckg.sources))
+    except Exception as exc:  # noqa: BLE001 - recorded, not swallowed
+        named_acquisitions = []
+        rows += [_row(name, 0, forward_seconds="", **_error_fields(exc))
+                 for name in DCKG_ACQUISITIONS]
+
+    # --- cEI ----------------------------------------------------------------
+    try:
+        cei_loop, _, _, cei_acqf = prepare_cei_state(black_box_function, n_train, args.seed)
+        named_acquisitions.append((CEI, cei_acqf))
+        dim_x = cei_loop.dim_x
+    except Exception as exc:  # noqa: BLE001
+        rows.append(_row(CEI, 0, forward_seconds="", **_error_fields(exc)))
+        dim_x = None
+
+    for name, acquisition_function in named_acquisitions:
+        dim = dim_x if dim_x is not None else loop.dim_x
+        X = torch.rand(1, ACQUISITION_Q[name], dim, device=DEVICE, dtype=DTYPE)
+        try:
+            elapsed = _time_forwards(acquisition_function, X,
+                                     args.forward_warmups, args.forward_repeats)
+            rows += [_row(name, repeat, forward_seconds=value,
+                          status="ok", error_type="", error_message="")
+                     for repeat, value in enumerate(elapsed)]
+        except Exception as exc:  # noqa: BLE001
+            rows.append(_row(name, 0, forward_seconds="", **_error_fields(exc)))
+        logging.info(f"  forward n_train={n_train} {name} (q={ACQUISITION_Q[name]}): "
+                     f"{_median_ms(rows, name):.3f} ms (median)")
+    return rows
 
 
-def append_record(csv_path, record):
-    write_header = not os.path.exists(csv_path)
-    with open(csv_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        if write_header:
-            writer.writeheader()
-        writer.writerow(record)
+# ----------------------------------------------------------------------------
+# Measurement 2: complete acquisition optimisation
+# ----------------------------------------------------------------------------
 
+def measure_optimisation(black_box_function, n_train, args, base_record):
+    """One timed row per (acquisition, repeat) around the complete production
+    optimisation call. GP fitting and acquisition construction are excluded:
+    they happen in the untimed prelude."""
+    from Launcher import set_all_seeds
+    from bo.bo_loops.bo_loop import IndependentSourcesOptimizationLoop
+
+    rows = []
+
+    def _row(name, repeat, opt_seed, **fields):
+        return dict(base_record, n_train=n_train, acquisition=name, repeat=repeat,
+                    seed=args.seed, opt_seed=opt_seed, **fields)
+
+    def _repeats():
+        """(repeat, is_warmup) over the warm-ups followed by the timed repetitions."""
+        return [(r, r < 0) for r in range(-args.opt_warmups, args.opt_repeats)]
+
+    # --- dcKG sources -------------------------------------------------------
+    try:
+        loop, _, all_dckg = prepare_state(black_box_function, n_train, args.seed)
+    except Exception as exc:  # noqa: BLE001
+        rows += [_row(name, 0, "", optimise_seconds="", acquisition_value="",
+                      **_error_fields(exc)) for name in DCKG_ACQUISITIONS]
+        all_dckg = None
+
+    if all_dckg is not None:
+        for source_index, (name, source_acqf) in enumerate(zip(DCKG_ACQUISITIONS, all_dckg.sources)):
+            for repeat, is_warmup in _repeats():
+                opt_seed = (args.seed + max(repeat, 0) + source_index * 100
+                            + (WARMUP_SEED_OFFSET if is_warmup else 0))
+                try:
+                    t0 = time.perf_counter()
+                    _, value = IndependentSourcesOptimizationLoop._optimize_single_source(
+                        source_acqf, loop.bounds,
+                        x_best=all_dckg.x_best,
+                        num_restarts=PROD_NUM_RESTARTS, raw_samples=PROD_RAW_SAMPLES,
+                        seed=opt_seed, warm_start_ic=None)
+                    elapsed = time.perf_counter() - t0
+                    if not is_warmup:
+                        rows.append(_row(name, repeat, opt_seed, optimise_seconds=elapsed,
+                                         acquisition_value=float(value),
+                                         status="ok", error_type="", error_message=""))
+                except Exception as exc:  # noqa: BLE001
+                    if not is_warmup:
+                        rows.append(_row(name, repeat, opt_seed, optimise_seconds="",
+                                         acquisition_value="", **_error_fields(exc)))
+            logging.info(f"  optimise n_train={n_train} {name}: "
+                         f"{_median_s(rows, name):.3f} s (median)")
+
+    # --- cEI ----------------------------------------------------------------
+    try:
+        cei_loop, cei_model, x_best, cei_acqf = prepare_cei_state(
+            black_box_function, n_train, args.seed)
+    except Exception as exc:  # noqa: BLE001
+        rows.append(_row(CEI, 0, "", optimise_seconds="", acquisition_value="",
+                         **_error_fields(exc)))
+        return rows
+
+    for repeat, is_warmup in _repeats():
+        opt_seed = args.seed + max(repeat, 0) + (WARMUP_SEED_OFFSET if is_warmup else 0)
+        try:
+            # compute_next_sample takes no seed argument, so the global RNG is
+            # what makes repetitions distinct.
+            set_all_seeds(opt_seed)
+            t0 = time.perf_counter()
+            _, value = optimise_cei(cei_loop, cei_model, cei_acqf, x_best)
+            elapsed = time.perf_counter() - t0
+            if not is_warmup:
+                rows.append(_row(CEI, repeat, opt_seed, optimise_seconds=elapsed,
+                                 acquisition_value=float(value),
+                                 status="ok", error_type="", error_message=""))
+        except Exception as exc:  # noqa: BLE001
+            if not is_warmup:
+                rows.append(_row(CEI, repeat, opt_seed, optimise_seconds="",
+                                 acquisition_value="", **_error_fields(exc)))
+    logging.info(f"  optimise n_train={n_train} {CEI}: {_median_s(rows, CEI):.3f} s (median)")
+    return rows
+
+
+# ----------------------------------------------------------------------------
+# Measurement 3a: one complete sequential dcKG BO iteration
+# ----------------------------------------------------------------------------
+
+def run_one_bo_iteration(loop, train_x, train_y, seed):
+    """One complete sequential dcKG BO iteration, reproducing
+    IndependentSourcesOptimizationLoop.run() (bo/bo_loops/bo_loop.py:1487-1552).
+
+    ``train_x``/``train_y`` are mutated in place (step 9). The outer timer is
+    started before the first component and stopped after the dataset update; it
+    is measured independently and never assembled from the component timers.
+    Everything runs sequentially: no multiprocessing, threads, futures or async.
+    """
+    import torch
+
+    components = {}
+    total_start = time.perf_counter()
+
+    # (2) Fit the objective and constraint GPs (production procedure).
+    t0 = time.perf_counter()
+    model = loop.update_model(X=train_x, y=train_y)
+    components["fit_models_seconds"] = time.perf_counter() - t0
+
+    # (3) Construct the three acquisitions. The recommendation of x_best is a
+    # prerequisite of AllSourcesDcKG and is accounted for here.
+    t0 = time.perf_counter()
+    x_best, all_dckg = build_acquisitions(loop, model, seed)
+    components["construct_acquisitions_seconds"] = time.perf_counter() - t0
+
+    # (4) Optimise dckg_objective, dckg_constraint, coupled_ckg -- in that order.
+    kg_values = torch.zeros(all_dckg.n_sources)
+    best_xs = []
+    for source_index, source_acqf in enumerate(all_dckg.sources):
+        t0 = time.perf_counter()
+        best_x_s, value_s = loop._optimize_single_source(
+            source_acqf, loop.bounds,
+            x_best=all_dckg.x_best,
+            num_restarts=PROD_NUM_RESTARTS, raw_samples=PROD_RAW_SAMPLES,
+            seed=seed + source_index * 100, warm_start_ic=None)
+        components[f"optimise_{DCKG_ACQUISITIONS[source_index]}_seconds"] = (
+            time.perf_counter() - t0)
+        kg_values[source_index] = value_s
+        best_xs.append(best_x_s)
+
+    # (5-7) Cost normalisation, delta feasibility rule, source selection.
+    t0 = time.perf_counter()
+    coupled_index = all_dckg.n_sources - 1
+    x_ckg = best_xs[coupled_index][:, 0:1, :].reshape(1, -1)
+    idx_to_eval = loop.compute_important_idxs(model, x_ckg)
+    coupled_cost = torch.sum(loop.costs[idx_to_eval])
+    costs_with_ckg = torch.cat([loop.costs, coupled_cost.unsqueeze(0)])
+    if (kg_values == 0).all():
+        new_x = x_best.detach().reshape(1, -1)
+        sources_to_eval = loop.compute_important_idxs(model, new_x)
+        index = coupled_index
+    else:
+        index = int(torch.argmax(kg_values / costs_with_ckg))
+        new_x = best_xs[index][:, 0:1, :].reshape(1, -1)
+        sources_to_eval = idx_to_eval if index == coupled_index else [index]
+    components["select_action_seconds"] = time.perf_counter() - t0
+
+    # (8) Evaluate the selected Mystery source(s) at the selected location.
+    t0 = time.perf_counter()
+    new_ys = [loop.evaluate_black_box_func(new_x, src_idx) for src_idx in sources_to_eval]
+    components["evaluate_sources_seconds"] = time.perf_counter() - t0
+
+    # (9) Append the observation(s) to the corresponding dataset(s).
+    t0 = time.perf_counter()
+    for src_idx, new_y in zip(sources_to_eval, new_ys):
+        train_x[src_idx] = torch.cat([train_x[src_idx].cpu(), new_x.cpu()])
+        train_y[src_idx] = torch.cat([train_y[src_idx].cpu(), new_y.cpu()])
+    components["update_datasets_seconds"] = time.perf_counter() - t0
+
+    # (10) Stop the outer timer only after the dataset update has completed.
+    components["total_loop_seconds"] = time.perf_counter() - total_start
+
+    components.update(
+        selected_action=DCKG_ACQUISITIONS[index],
+        selected_location=_join_location(new_x),
+        selected_sources=";".join(str(int(s)) for s in sources_to_eval),
+        objective_acquisition_value=float(kg_values[0]),
+        constraint_acquisition_value=float(kg_values[1]),
+        coupled_acquisition_value=float(kg_values[coupled_index]),
+        n_objective_after=int(train_x[0].shape[0]),
+        n_constraint_after=int(train_x[1].shape[0]),
+    )
+    return components
+
+
+# ----------------------------------------------------------------------------
+# Measurement 3b: one complete sequential cEI BO iteration
+# ----------------------------------------------------------------------------
+
+def run_one_cei_iteration(loop, train_x, train_y, seed):
+    """One complete coupled cEI BO iteration, reproducing
+    EI_OptimizationLoop.run() (bo/bo_loops/bo_loop.py:879-904).
+
+    cEI is coupled: there is no source selection, and every output is evaluated
+    at the selected location, so one observation is appended to every dataset.
+    """
+    import torch
+
+    components = {}
+    total_start = time.perf_counter()
+
+    t0 = time.perf_counter()
+    model = loop.update_model(X=train_x, y=train_y)
+    components["fit_models_seconds"] = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    x_best, acquisition_function = build_cei_acquisition(loop, model, iteration=seed)
+    components["construct_acquisition_seconds"] = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    new_x, value = optimise_cei(loop, model, acquisition_function, x_best)
+    components["optimise_cei_seconds"] = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    new_y = loop.black_box_func.evaluate_black_box(new_x.cpu(), False)
+    components["evaluate_sources_seconds"] = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    for output_index in range(loop.model_wrapper.getNumberOfOutputs()):
+        train_x[output_index] = torch.cat([train_x[output_index].cpu(), new_x.cpu()])
+        train_y[output_index] = torch.cat([train_y[output_index].cpu(),
+                                          new_y[:, output_index].cpu()])
+    components["update_datasets_seconds"] = time.perf_counter() - t0
+
+    components["total_loop_seconds"] = time.perf_counter() - total_start
+
+    components.update(
+        selected_location=_join_location(new_x),
+        selected_sources=";".join(str(i) for i in range(loop.model_wrapper.getNumberOfOutputs())),
+        cei_acquisition_value=float(value),
+        n_objective_after=int(train_x[0].shape[0]),
+        n_constraint_after=int(train_x[1].shape[0]),
+    )
+    return components
+
+
+def measure_loop(black_box_function, n_train, args, base_record, *,
+                 loop_factory, iteration_fn, columns, label):
+    """Timed sequential BO iterations, each starting from the same base state.
+
+    The base datasets are built once, outside every timer. Before each
+    repetition a fresh loop (hence a fresh, unfitted model wrapper) is created
+    and the base datasets are cloned, so the observation(s) appended by one
+    repetition are discarded before the next one.
+    """
+    from Launcher import set_all_seeds
+
+    rows = []
+    base_loop = loop_factory(black_box_function, args.data_seed)
+    base_train_x, base_train_y = make_base_state(base_loop, n_train)
+
+    for repeat in range(-args.loop_warmups, args.loop_repeats):
+        is_warmup = repeat < 0
+        seed = args.seed + max(repeat, 0) + (WARMUP_SEED_OFFSET if is_warmup else 0)
+        set_all_seeds(seed)
+        loop = loop_factory(black_box_function, args.data_seed)
+        train_x = [t.clone() for t in base_train_x]
+        train_y = [t.clone() for t in base_train_y]
+        n_objective_before = int(train_x[0].shape[0])
+        n_constraint_before = int(train_x[1].shape[0])
+
+        try:
+            components = iteration_fn(loop, train_x, train_y, seed)
+            status_fields = dict(status="ok", error_type="", error_message="")
+        except Exception as exc:  # noqa: BLE001
+            components = {}
+            status_fields = _error_fields(exc)
+
+        if is_warmup:
+            logging.info(f"  {label} warm-up n_train={n_train} done")
+            continue
+
+        row = dict(base_record, n_train=n_train, repeat=repeat, seed=seed,
+                   n_objective_before=n_objective_before,
+                   n_constraint_before=n_constraint_before,
+                   **status_fields)
+        for column in columns:
+            row.setdefault(column, components.get(column, ""))
+        rows.append(row)
+        total = row["total_loop_seconds"] if row["status"] == "ok" else "FAILED"
+        logging.info(f"  {label} n_train={n_train} repeat={repeat}: {total} s")
+    return rows
+
+
+# ----------------------------------------------------------------------------
+# Output
+# ----------------------------------------------------------------------------
+
+def _join_location(new_x):
+    return ";".join(f"{v:.6f}" for v in new_x.detach().cpu().reshape(-1).tolist())
+
+
+def _error_fields(exc):
+    return {"status": "error", "error_type": type(exc).__name__,
+            "error_message": str(exc).replace("\n", " ")[:500]}
+
+
+def _values(rows, column, acquisition=None):
+    return [row[column] for row in rows
+            if row["status"] == "ok" and (acquisition is None or row["acquisition"] == acquisition)]
+
+
+def _median_ms(rows, acquisition):
+    values = _values(rows, "forward_seconds", acquisition)
+    return statistics.median(values) * 1e3 if values else float("nan")
+
+
+def _median_s(rows, acquisition):
+    values = _values(rows, "optimise_seconds", acquisition)
+    return statistics.median(values) if values else float("nan")
+
+
+def _quantiles(values):
+    """Median, 25th and 75th percentile (linear interpolation, numpy convention)."""
+    import numpy as np
+    if not values:
+        return "", "", ""
+    array = np.asarray(values, dtype=float)
+    return (float(np.median(array)), float(np.percentile(array, 25)),
+            float(np.percentile(array, 75)))
+
+
+def _median(values):
+    import numpy as np
+    return float(np.median(np.asarray(values, dtype=float))) if values else ""
+
+
+def write_csv(path, columns, rows):
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    logging.info(f"Wrote {path} ({len(rows)} rows)")
+
+
+def _summarise_per_acquisition(rows, column, scale, names):
+    summary = []
+    for n_train in sorted({row["n_train"] for row in rows}):
+        for acquisition in ACQUISITIONS:
+            subset = [r for r in rows
+                      if r["n_train"] == n_train and r["acquisition"] == acquisition]
+            ok = [r[column] * scale for r in subset if r["status"] == "ok"]
+            median, q25, q75 = _quantiles(ok)
+            summary.append({"n_train": n_train, "acquisition": acquisition,
+                            names[0]: median, names[1]: q25, names[2]: q75,
+                            "successes": len(ok), "failures": len(subset) - len(ok)})
+    return summary
+
+
+FORWARD_SUMMARY_COLUMNS = ["n_train", "acquisition", "forward_median_ms", "forward_q25_ms",
+                           "forward_q75_ms", "successes", "failures"]
+OPT_SUMMARY_COLUMNS = ["n_train", "acquisition", "optimise_median_s", "optimise_q25_s",
+                       "optimise_q75_s", "successes", "failures"]
+
+
+def summarise_forward(rows):
+    return _summarise_per_acquisition(rows, "forward_seconds", 1e3,
+                                      FORWARD_SUMMARY_COLUMNS[2:5])
+
+
+def summarise_optimisation(rows):
+    return _summarise_per_acquisition(rows, "optimise_seconds", 1.0,
+                                      OPT_SUMMARY_COLUMNS[2:5])
+
+
+LOOP_COMPONENT_COLUMNS = ["fit_models_seconds", "construct_acquisitions_seconds",
+                          "optimise_dckg_objective_seconds", "optimise_dckg_constraint_seconds",
+                          "optimise_coupled_ckg_seconds", "select_action_seconds",
+                          "evaluate_sources_seconds", "update_datasets_seconds"]
+
+CEI_LOOP_COMPONENT_COLUMNS = ["fit_models_seconds", "construct_acquisition_seconds",
+                              "optimise_cei_seconds", "evaluate_sources_seconds",
+                              "update_datasets_seconds"]
+
+
+def summarise_loop(rows, component_columns, count_actions):
+    summary = []
+    for n_train in sorted({row["n_train"] for row in rows}):
+        subset = [r for r in rows if r["n_train"] == n_train]
+        ok = [r for r in subset if r["status"] == "ok"]
+        median, q25, q75 = _quantiles([r["total_loop_seconds"] for r in ok])
+        record = {"n_train": n_train, "total_loop_median_s": median,
+                  "total_loop_q25_s": q25, "total_loop_q75_s": q75}
+        for column in component_columns:
+            record[column.replace("_seconds", "_median_s")] = _median([r[column] for r in ok])
+        record["successes"] = len(ok)
+        record["failures"] = len(subset) - len(ok)
+        if count_actions:
+            for action, key in zip(DCKG_ACQUISITIONS, ["selected_objective_count",
+                                                       "selected_constraint_count",
+                                                       "selected_coupled_count"]):
+                record[key] = sum(1 for r in ok if r["selected_action"] == action)
+        summary.append(record)
+    return summary
+
+
+def _loop_summary_columns(component_columns, count_actions):
+    columns = (["n_train", "total_loop_median_s", "total_loop_q25_s", "total_loop_q75_s"]
+               + [c.replace("_seconds", "_median_s") for c in component_columns]
+               + ["successes", "failures"])
+    if count_actions:
+        columns += ["selected_objective_count", "selected_constraint_count",
+                    "selected_coupled_count"]
+    return columns
+
+
+LOOP_SUMMARY_COLUMNS = _loop_summary_columns(LOOP_COMPONENT_COLUMNS, True)
+CEI_LOOP_SUMMARY_COLUMNS = _loop_summary_columns(CEI_LOOP_COMPONENT_COLUMNS, False)
+
+
+def write_metadata(path, args, threads, torch_version):
+    metadata = {
+        "benchmark": BENCHMARK,
+        "device": DEVICE_NAME,
+        "dtype": "torch.float64",
+        "threads": threads,
+        "torch_version": torch_version,
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "n_train_values": list(args.n_train),
+        "acquisitions": list(ACQUISITIONS),
+        "production_settings": {
+            "n_fantasies": PROD_N_FANTASIES,
+            "n_constraint_samples": PROD_N_CONSTRAINT_SAMPLES,
+            "n_disc_acqf": PROD_N_DISC_ACQF,
+            "n_disc_optimiser": PROD_N_DISC_OPT,
+            "q": PROD_Q,
+            "num_restarts": PROD_NUM_RESTARTS,
+            "raw_samples": PROD_RAW_SAMPLES,
+            "infeasibility_threshold_delta": PROD_INFEASIBILITY_THRESHOLD,
+            "cei_q": PROD_CEI_Q,
+            "cei_num_restarts": PROD_CEI_NUM_RESTARTS,
+            "cei_raw_samples": PROD_CEI_RAW_SAMPLES,
+        },
+        "forward_warmups": args.forward_warmups,
+        "forward_repeats": args.forward_repeats,
+        "forward_q": {name: ACQUISITION_Q[name] for name in ACQUISITIONS},
+        "forward_q_note": (
+            "The dcKG acquisitions are evaluated on a candidate plus a 64-point discretisation "
+            "(q=65); cEI is evaluated on a single candidate (q=1). Per-call forward times are "
+            "therefore not directly comparable across the two families."
+        ),
+        "opt_warmups": args.opt_warmups,
+        "opt_repeats": args.opt_repeats,
+        "sequential_execution": True,
+        "loop_definition": LOOP_DEFINITION,
+        "cei_loop_definition": CEI_LOOP_DEFINITION,
+        "loop_warmups": args.loop_warmups,
+        "loop_repeats": args.loop_repeats,
+        "loop_includes_gp_fitting": True,
+        "loop_includes_source_evaluation": True,
+        "loop_includes_dataset_update": True,
+        "individual_optimisation_includes_gp_fitting": False,
+        "gp_refit_strategy": GP_REFIT_STRATEGY,
+        "gp_refit_strategy_detail": GP_REFIT_STRATEGY_DETAIL,
+        "recommendation_step": RECOMMENDATION_STEP,
+        "smoke_test": bool(args.smoke_test),
+    }
+    with open(path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    logging.info(f"Wrote {path}")
+
+
+# ----------------------------------------------------------------------------
 
 def main(args):
     import torch
@@ -462,116 +866,71 @@ def main(args):
 
     from bo.device_utils import DEVICE, DTYPE
 
-    if args.device == "cuda" and not torch.cuda.is_available():
-        sys.exit("ERROR: --device cuda requested but CUDA is not available on this machine.")
-    if args.device == "cpu" and torch.cuda.is_available():
-        sys.exit("ERROR: --device cpu requested but CUDA is still visible; "
-                 "CUDA_VISIBLE_DEVICES was not applied before torch import.")
+    if torch.cuda.is_available():
+        raise SystemExit("ERROR: this is a CPU-only benchmark but CUDA is still visible; "
+                         "CUDA_VISIBLE_DEVICES was not applied before torch import.")
 
     # Match the module-level settings applied by bayesian_optimization_factory.py
     torch.set_default_dtype(DTYPE)
     settings.min_fixed_noise._global_double_value = 1e-6
+    if args.threads is not None:
+        torch.set_num_threads(args.threads)
+    threads = torch.get_num_threads()
 
-    device_name = torch.cuda.get_device_name(0) if args.device == "cuda" else "cpu"
-    logging.info(f"Timing study on device={DEVICE} ({device_name}), torch {torch.__version__}")
+    logging.info(f"Mystery timing benchmark on {DEVICE} ({threads} threads), "
+                 f"torch {torch.__version__}, n_train={args.n_train}")
 
-    black_box_function = make_black_box(args.function)
+    black_box_function = make_mystery()
     os.makedirs(args.output_dir, exist_ok=True)
-    csv_path = os.path.join(args.output_dir, f"timing_{args.function}_{args.device}.csv")
-    pkl_path = os.path.join(args.output_dir, f"timing_{args.function}_{args.device}.pkl")
+    base_record = {"benchmark": BENCHMARK, "device": DEVICE_NAME, "dtype": str(DTYPE),
+                   "threads": threads}
 
-    records = []
-    if os.path.exists(pkl_path):
-        with open(pkl_path, "rb") as f:
-            records = pickle.load(f)
+    forward_rows, opt_rows, loop_rows, cei_loop_rows = [], [], [], []
+    for n_train in args.n_train:
+        logging.info(f"n_train={n_train}: forward evaluation")
+        forward_rows += measure_forward(black_box_function, n_train, args, base_record)
+        logging.info(f"n_train={n_train}: acquisition optimisation")
+        opt_rows += measure_optimisation(black_box_function, n_train, args, base_record)
+        logging.info(f"n_train={n_train}: sequential dcKG BO iteration")
+        loop_rows += measure_loop(black_box_function, n_train, args, base_record,
+                                  loop_factory=make_loop, iteration_fn=run_one_bo_iteration,
+                                  columns=LOOP_COLUMNS, label="dckg loop")
+        logging.info(f"n_train={n_train}: sequential cEI BO iteration")
+        cei_loop_rows += measure_loop(black_box_function, n_train, args, base_record,
+                                      loop_factory=make_cei_loop,
+                                      iteration_fn=run_one_cei_iteration,
+                                      columns=CEI_LOOP_COLUMNS, label="cei loop")
 
-    seeds = list(range(args.min_seed, args.max_seed + 1))
+    out = args.output_dir
+    write_csv(os.path.join(out, "mystery_forward_raw.csv"), FORWARD_COLUMNS, forward_rows)
+    write_csv(os.path.join(out, "mystery_forward_summary.csv"), FORWARD_SUMMARY_COLUMNS,
+              summarise_forward(forward_rows))
+    write_csv(os.path.join(out, "mystery_opt_raw.csv"), OPT_COLUMNS, opt_rows)
+    write_csv(os.path.join(out, "mystery_opt_summary.csv"), OPT_SUMMARY_COLUMNS,
+              summarise_optimisation(opt_rows))
+    write_csv(os.path.join(out, "mystery_bo_loop_raw.csv"), LOOP_COLUMNS, loop_rows)
+    write_csv(os.path.join(out, "mystery_bo_loop_summary.csv"), LOOP_SUMMARY_COLUMNS,
+              summarise_loop(loop_rows, LOOP_COMPONENT_COLUMNS, count_actions=True))
+    write_csv(os.path.join(out, "mystery_cei_loop_raw.csv"), CEI_LOOP_COLUMNS, cei_loop_rows)
+    write_csv(os.path.join(out, "mystery_cei_loop_summary.csv"), CEI_LOOP_SUMMARY_COLUMNS,
+              summarise_loop(cei_loop_rows, CEI_LOOP_COMPONENT_COLUMNS, count_actions=False))
+    write_metadata(os.path.join(out, "mystery_timing_metadata.json"), args, threads,
+                   torch.__version__)
 
-    for algorithm in args.algorithms:
-        knob_points = _knob_points(algorithm, args.n_disc, args.n_fantasies,
-                                   args.n_constraint_samples)
-        baseline_point = (None, None, None) if algorithm == "CEI" else (
-            BASELINE_N_DISC, BASELINE_N_FANTASIES, BASELINE_N_CONSTRAINT_SAMPLES)
-        # Warm-ups: smallest budget at the baseline knobs, flagged warmup=1.
-        warmup_runs = [(min(args.n_train), *baseline_point, 10_000 + w, 1)
-                       for w in range(args.warmup)]
-        # Timed: every (n_train, knob point, seed).
-        timed_runs = [(n, nd, nf, nc, seed, 0)
-                      for n in args.n_train
-                      for (nd, nf, nc) in knob_points
-                      for seed in seeds]
-
-        for n_train, n_disc, n_fantasies, n_constraint_samples, seed, warmup in \
-                warmup_runs + timed_runs:
-            label = "warmup" if warmup else "timed"
-            logging.info(f"[{label}] algorithm={algorithm}, n_train={n_train}, "
-                         f"n_disc={n_disc}, n_fantasies={n_fantasies}, "
-                         f"n_constraint_samples={n_constraint_samples}, seed={seed}")
-            timings = run_once(algorithm, black_box_function, n_train, seed,
-                               batch_size=args.forward_batch_size,
-                               n_forwards=args.forwards_per_run,
-                               no_fit=args.no_fit,
-                               n_disc=n_disc, n_fantasies=n_fantasies,
-                               n_constraint_samples=n_constraint_samples)
-
-            # dcKG sources: [objective, constraint_1..K, coupled cKG]. The
-            # single-source time is the mean over the K+1 decoupled sources;
-            # the coupled time is the last source (full coupled cKG).
-            def _split_sources(times):
-                if not times:
-                    return "", ""
-                return sum(times[:-1]) / len(times[:-1]), times[-1]
-
-            per_source_times = timings["per_source_times"]
-            per_source_first_times = timings["per_source_first_times"]
-            single_source_time, coupled_time = _split_sources(per_source_times)
-            single_source_first_time, coupled_first_time = _split_sources(per_source_first_times)
-            record = {
-                "function": args.function,
-                "algorithm": algorithm,
-                "device": args.device,
-                "device_name": device_name,
-                "n_train": n_train,
-                "n_disc": "NA" if n_disc is None else n_disc,
-                "n_fantasies": "NA" if n_fantasies is None else n_fantasies,
-                "n_constraint_samples": "NA" if n_constraint_samples is None else n_constraint_samples,
-                "seed": seed,
-                "warmup": warmup,
-                "dim": black_box_function.dim,
-                "n_constraints": black_box_function.get_number_of_constraints(),
-                "forward_batch_size": args.forward_batch_size,
-                "q_per_forward": timings["q_per_forward"],
-                "forwards_per_run": args.forwards_per_run,
-                "hyperparams_fitted": 0 if args.no_fit else 1,
-                "fit_time_s": timings["fit_time_s"],
-                "recommendation_time_s": timings["recommendation_time_s"],
-                "acqf_construction_time_s": timings["acqf_construction_time_s"],
-                "acqf_forward_time_s": timings["acqf_forward_time_s"],
-                "dckg_single_source_forward_time_s": single_source_time,
-                "dckg_coupled_forward_time_s": coupled_time,
-                "per_source_forward_times_s": ";".join(f"{t:.6f}" for t in per_source_times),
-                "acqf_first_forward_time_s": timings["acqf_first_forward_time_s"],
-                "dckg_single_source_first_forward_time_s": single_source_first_time,
-                "dckg_coupled_first_forward_time_s": coupled_first_time,
-                "per_source_first_forward_times_s": ";".join(f"{t:.6f}" for t in per_source_first_times),
-                "torch_version": torch.__version__,
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-            }
-            append_record(csv_path, record)
-            records.append(record)
-            with open(pkl_path, "wb") as f:
-                pickle.dump(records, f)
-            logging.info(f"    first_forward={timings['acqf_first_forward_time_s'] * 1e3:.2f}ms, "
-                         f"steady_forward={timings['acqf_forward_time_s'] * 1e3:.3f}ms "
-                         f"(fit={timings['fit_time_s']:.3f}s)")
-
-    logging.info(f"Done. Results in {csv_path}")
+    all_rows = forward_rows + opt_rows + loop_rows + cei_loop_rows
+    failures = [r for r in all_rows if r["status"] != "ok"]
+    if failures:
+        logging.warning(f"{len(failures)} measurement(s) failed; see the status columns.")
+        for row in failures:
+            logging.warning(f"  {row['error_type']}: {row['error_message']}")
+    logging.info(f"Done. Render the paper table with: python timing_table.py --input {out}")
 
 
 if __name__ == "__main__":
-    _args = parse_args()
-    if _args.device == "cpu":
-        # Must happen before torch (and any bo module) is imported: bo.device_utils
-        # resolves DEVICE at import time.
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    main(_args)
+    try:
+        main(parse_args())
+    except SystemExit:
+        raise
+    except Exception:
+        traceback.print_exc()
+        raise

@@ -1,268 +1,206 @@
-"""Aggregate Launcher_timing.py results into paper-ready tables.
+"""Render the paper-ready Mystery timing table from Launcher_timing.py output.
 
-Reads all ``timing_*.csv`` files in the input directory (default
-``results/timing_study/``), drops warm-up runs, and reports the mean +- std of
-the acquisition-function forward-pass time (milliseconds) per method, device
-and data budget. dcKG is split into its single decoupled source (mean over the
-objective/constraint sources) and its full coupled cKG source.
-
-For each benchmark function and each of the two forward metrics (see below), a
-separate table is produced for every acquisition-function complexity axis swept
-by Launcher_timing.py — discretisation size (``n_disc``), fantasy samples
-(``n_fantasies``) and constraint samples (``n_constraint_samples``). Within one
-axis table the other two knobs are held at their baseline; cEI has no such
-knobs and appears as a single reference row (axis value ``--``).
-
-The two metrics:
-  - first forward after a model update (includes the O(n^3) posterior-cache
-    build the BO loop pays once per iteration — this is where n_train scaling
-    shows), and
-  - steady-state forward (reuses the caches).
-
-For each (function, metric, axis) it prints a Markdown table to stdout and
-writes ``timing_table_<function>_<metric>_<axis>.tex`` (booktabs LaTeX). A
-single ``timing_summary.csv`` (aggregated mean/std/count across every
-function/metric/axis) is also written.
+Reads the summary CSVs and the metadata JSON written by ``Launcher_timing.py``
+(no statistic is recomputed here), prints a Markdown version to stdout and
+writes ``mystery_timing_table.tex``: a two-column-wide table with one body row
+per training size, grouping the steady-state forward times (ms), the complete
+acquisition-optimisation times (s) and the directly measured sequential BO
+iteration times (s) of the dcKG and cEI algorithms. Every cell is
+``median [q25, q75]``.
 
 Usage:
     python timing_table.py
     python timing_table.py --input results/timing_study
+    python timing_table.py --font-size footnotesize
 """
 import argparse
-import glob
+import csv
+import json
 import os
 
-import pandas as pd
+from Launcher_timing import ACQUISITIONS, N_TRAIN_VALUES
 
-from Launcher_timing import (BASELINE_N_CONSTRAINT_SAMPLES, BASELINE_N_DISC,
-                             BASELINE_N_FANTASIES)
+# Compact column headings, explained in the caption.
+ACQUISITION_LABELS = {"dckg_objective": "dcKG-f",
+                      "dckg_constraint": "dcKG-c",
+                      "coupled_ckg": "cKG",
+                      "cei": "cEI"}
 
-# Two metrics, reported as separate tables:
-#  - "first forward": the first acqf(X) call after a model update; includes
-#    building the GP posterior caches (O(n^3)) and is where n_train scaling shows.
-#  - "steady-state forward": subsequent calls reusing the caches.
-# Each maps to: [(algorithm in CSV, column holding the time in seconds, display name)]
-METRICS = {
-    "first": {
-        "title": "first forward after model update",
-        "suffix": "first",
-        "methods": [
-            ("DCKG_INDEPENDENT", "dckg_single_source_first_forward_time_s", "dcKG (single source)"),
-            ("DCKG_INDEPENDENT", "dckg_coupled_first_forward_time_s", "dcKG (coupled cKG)"),
-            ("CKG_V2", "acqf_first_forward_time_s", "cKG"),
-            ("CEI", "acqf_first_forward_time_s", "cEI"),
-        ],
-    },
-    "steady": {
-        "title": "steady-state forward",
-        "suffix": "steady",
-        "methods": [
-            ("DCKG_INDEPENDENT", "dckg_single_source_forward_time_s", "dcKG (single source)"),
-            ("DCKG_INDEPENDENT", "dckg_coupled_forward_time_s", "dcKG (coupled cKG)"),
-            ("CKG_V2", "acqf_forward_time_s", "cKG"),
-            ("CEI", "acqf_forward_time_s", "cEI"),
-        ],
-    },
-}
+FORWARD_SUMMARY = "mystery_forward_summary.csv"
+OPT_SUMMARY = "mystery_opt_summary.csv"
+LOOP_SUMMARY = "mystery_bo_loop_summary.csv"
+CEI_LOOP_SUMMARY = "mystery_cei_loop_summary.csv"
+METADATA = "mystery_timing_metadata.json"
+TABLE = "mystery_timing_table.tex"
 
-# Complexity axes swept by Launcher_timing.py. For each axis the OTHER two knobs
-# are pinned to their baseline so the table isolates the effect of that one axis.
-KNOB_COLUMNS = ["n_disc", "n_fantasies", "n_constraint_samples"]
-AXES = {
-    "n_disc": {
-        "title": "discretisation size",
-        "latex": r"$n_\mathrm{disc}$",
-        "others": {"n_fantasies": BASELINE_N_FANTASIES,
-                   "n_constraint_samples": BASELINE_N_CONSTRAINT_SAMPLES},
-    },
-    "n_fantasies": {
-        "title": "fantasy samples",
-        "latex": r"$n_y$",
-        "others": {"n_disc": BASELINE_N_DISC,
-                   "n_constraint_samples": BASELINE_N_CONSTRAINT_SAMPLES},
-    },
-    "n_constraint_samples": {
-        "title": "constraint samples",
-        "latex": r"$n_c$",
-        "others": {"n_disc": BASELINE_N_DISC,
-                   "n_fantasies": BASELINE_N_FANTASIES},
-    },
-}
-DEVICE_ORDER = ["cpu", "cuda"]
-DEVICE_LABELS = {"cpu": "CPU", "cuda": "GPU"}
+FONT_SIZES = ["normalsize", "small", "footnotesize", "scriptsize"]
 
 
-def load_results(input_dir):
-    files = sorted(glob.glob(os.path.join(input_dir, "timing_*.csv")))
-    if not files:
-        raise SystemExit(f"No timing_*.csv files found in {input_dir}")
-    frames = [pd.read_csv(f) for f in files]
-    df = pd.concat(frames, ignore_index=True)
-    df = df[df["warmup"] == 0]
-    if df.empty:
-        raise SystemExit("Only warm-up rows found; run more seeds first.")
-    # The knob columns are "NA" for cEI (no discretisation / samples); coerce to
-    # nullable numeric so cEI rows become NaN and form their own axis group.
-    for col in KNOB_COLUMNS:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
+def read_csv(path):
+    if not os.path.exists(path):
+        raise SystemExit(f"Missing {path}. Run Launcher_timing.py first.")
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
 
 
-def filter_to_axis(df, axis_col, others):
-    """Rows relevant to one axis: the other two knobs at baseline, plus cEI
-    (all-NaN knobs) which is a knob-independent reference line."""
-    mask = pd.Series(True, index=df.index)
-    for col, baseline in others.items():
-        mask &= (df[col] == baseline) | df[col].isna()
-    return df[mask]
+def read_metadata(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        return json.load(f)
 
 
-def aggregate(df, methods, metric_name, axis_col):
-    """Long-format aggregation: one row per
-    (function, metric, method, axis, device, n_train, axis_value),
-    times converted to milliseconds. Returns None if nothing matches."""
-    parts = []
-    for algorithm, column, method in methods:
-        if column not in df.columns:
-            continue
-        sub = df[df["algorithm"] == algorithm].dropna(subset=[column])
-        if sub.empty:
-            continue
-        grouped = (sub.groupby(["function", "device", "n_train", axis_col], dropna=False)[column]
-                      .agg(mean="mean", std="std", runs="count")
-                      .reset_index())
-        grouped["mean"] = grouped["mean"] * 1e3
-        grouped["std"] = grouped["std"].fillna(0.0) * 1e3
-        grouped = grouped.rename(columns={axis_col: "axis_value"})
-        grouped.insert(1, "method", method)
-        grouped.insert(1, "axis", axis_col)
-        grouped.insert(1, "metric", metric_name)
-        parts.append(grouped)
-    if not parts:
+def _float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
         return None
-    return pd.concat(parts, ignore_index=True)
 
 
-def format_cell(mean, std):
-    if mean < 1:
-        return f"{mean:.3f} ± {std:.3f}"
-    if mean < 100:
-        return f"{mean:.2f} ± {std:.2f}"
-    return f"{mean:.1f} ± {std:.1f}"
+def _fmt(value):
+    if value is None:
+        return "--"
+    if abs(value) < 1:
+        return f"{value:.3f}"
+    if abs(value) < 100:
+        return f"{value:.2f}"
+    return f"{value:.1f}"
 
 
-def _axis_label(value):
-    return "--" if pd.isna(value) else str(int(value))
+def format_cell(median, q25, q75):
+    """``median [q25, q75]``, or ``--`` when the measurement is missing."""
+    median, q25, q75 = _float(median), _float(q25), _float(q75)
+    if median is None:
+        return "--"
+    return f"{_fmt(median)} [{_fmt(q25)}, {_fmt(q75)}]"
 
 
-def build_pivot(agg_fn, methods, axis_meta):
-    """Rows: (method, device, axis value); columns: n_train; cells: 'mean ± std' ms."""
-    n_trains = sorted(agg_fn["n_train"].unique())
-    method_order = [m[2] for m in methods]
-    axis_header = axis_meta["title"]
+def index_by_acquisition(rows, median_col, q25_col, q75_col):
+    """{(n_train, acquisition): cell string}"""
+    return {(int(row["n_train"]), row["acquisition"]):
+            format_cell(row[median_col], row[q25_col], row[q75_col])
+            for row in rows}
+
+
+def index_by_n_train(rows):
+    """{n_train: cell string} for a loop summary."""
+    return {int(row["n_train"]): format_cell(row["total_loop_median_s"],
+                                             row["total_loop_q25_s"],
+                                             row["total_loop_q75_s"])
+            for row in rows}
+
+
+def build_rows(input_dir, n_train_values):
+    forward = index_by_acquisition(read_csv(os.path.join(input_dir, FORWARD_SUMMARY)),
+                                   "forward_median_ms", "forward_q25_ms", "forward_q75_ms")
+    optimisation = index_by_acquisition(read_csv(os.path.join(input_dir, OPT_SUMMARY)),
+                                        "optimise_median_s", "optimise_q25_s", "optimise_q75_s")
+    dckg_loop = index_by_n_train(read_csv(os.path.join(input_dir, LOOP_SUMMARY)))
+    cei_loop = index_by_n_train(read_csv(os.path.join(input_dir, CEI_LOOP_SUMMARY)))
+
     rows = []
-    for method in dict.fromkeys(method_order):
-        for device in DEVICE_ORDER:
-            sub_md = agg_fn[(agg_fn["method"] == method) & (agg_fn["device"] == device)]
-            if sub_md.empty:
-                continue
-            axis_values = sorted(sub_md["axis_value"].dropna().unique())
-            if sub_md["axis_value"].isna().any():
-                axis_values = axis_values + [float("nan")]
-            for value in axis_values:
-                if pd.isna(value):
-                    sub = sub_md[sub_md["axis_value"].isna()]
-                else:
-                    sub = sub_md[sub_md["axis_value"] == value]
-                row = {"Method": method, "Device": DEVICE_LABELS.get(device, device),
-                       axis_header: _axis_label(value)}
-                for n in n_trains:
-                    cell = sub[sub["n_train"] == n]
-                    row[f"n={n}"] = (format_cell(cell["mean"].iloc[0], cell["std"].iloc[0])
-                                     if not cell.empty else "--")
-                rows.append(row)
-    return pd.DataFrame(rows), n_trains
+    for n_train in n_train_values:
+        cells = [forward.get((n_train, a), "--") for a in ACQUISITIONS]
+        cells += [optimisation.get((n_train, a), "--") for a in ACQUISITIONS]
+        cells += [dckg_loop.get(n_train, "--"), cei_loop.get(n_train, "--")]
+        rows.append((n_train, cells))
+    return rows
 
 
-def to_markdown(pivot, function, runs, metric_title, axis_title):
-    cols = list(pivot.columns)
-    widths = [max(len(str(c)), *(len(str(v)) for v in pivot[c])) for c in cols]
-    header = "| " + " | ".join(str(c).ljust(w) for c, w in zip(cols, widths)) + " |"
-    sep = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
-    rows = ["| " + " | ".join(str(row[c]).ljust(w) for c, w in zip(cols, widths)) + " |"
-            for _, row in pivot.iterrows()]
-    return "\n".join([f"### {function} — {metric_title} vs {axis_title}, "
-                      f"mean ± std (ms), {runs} runs",
-                      "", header, sep, *rows])
+def to_markdown(rows):
+    labels = [ACQUISITION_LABELS[a] for a in ACQUISITIONS]
+    header = (["Training points"]
+              + [f"fwd {label} [ms]" for label in labels]
+              + [f"opt {label} [s]" for label in labels]
+              + ["dcKG iteration [s]", "cEI iteration [s]"])
+    table = [header] + [[str(n)] + cells for n, cells in rows]
+    widths = [max(len(row[i]) for row in table) for i in range(len(header))]
+    lines = ["| " + " | ".join(c.ljust(w) for c, w in zip(table[0], widths)) + " |",
+             "|" + "|".join("-" * (w + 2) for w in widths) + "|"]
+    lines += ["| " + " | ".join(c.ljust(w) for c, w in zip(row, widths)) + " |"
+              for row in table[1:]]
+    return "\n".join(lines)
 
 
-def to_latex(pivot, function, n_trains, runs, metric_title, suffix, axis_meta):
-    axis_title = axis_meta["title"]
-    axis_latex = axis_meta["latex"]
-    cols = "lll" + "r" * len(n_trains)
-    header = ("Method & Device & " + axis_latex + " & "
-              + " & ".join(f"$n={n}$" for n in n_trains) + r" \\")
-    body = []
-    for _, row in pivot.iterrows():
-        cells = " & ".join(str(row[f"n={n}"]).replace("±", r"$\pm$") for n in n_trains)
-        body.append(f"{row['Method']} & {row['Device']} & {row[axis_title]} & {cells}" + r" \\")
-    return "\n".join([
-        r"\begin{table}[t]",
+def to_latex(rows, metadata, font_size):
+    labels = [ACQUISITION_LABELS[a] for a in ACQUISITIONS]
+    n_acqf = len(labels)
+    caption = (
+        r"Wall-clock timings of the dcKG and cEI acquisitions on the \textsc{Mystery} benchmark, "
+        r"measured on CPU, as a function of the number of training points $n$. The same $n$ "
+        r"observations are used for the objective GP and for the constraint GP. "
+        r"\emph{Forward evaluation} reports a steady-state acquisition evaluation (the GP "
+        r"posterior caches are already built); note that the dcKG acquisitions evaluate a "
+        r"candidate plus a 64-point discretisation ($q=65$) whereas cEI evaluates a single "
+        r"candidate ($q=1$), so per-call forward times are not directly comparable across the "
+        r"two families. \emph{Acquisition optimisation} reports the complete production "
+        r"optimisation of one acquisition -- raw-sample generation, restart initialisation, "
+        r"candidate and adaptive-discretisation optimisation, all L-BFGS-B restarts and the "
+        r"selection of the best candidate -- and excludes GP fitting and acquisition "
+        r"construction. The \emph{sequential BO iteration} columns each report one complete "
+        r"iteration of the corresponding algorithm, timed with a single outer timer: GP fitting, "
+        r"acquisition construction, the sequential optimisation of every acquisition the "
+        r"algorithm uses (all three for dcKG, one for cEI), source selection, evaluation of the "
+        r"selected source(s) and the dataset update. Both are measured directly and are not the "
+        r"sum of the individual columns. dcKG-f is the decoupled objective acquisition, dcKG-c "
+        r"the decoupled constraint acquisition, cKG the coupled knowledge-gradient acquisition "
+        r"and cEI the coupled constrained expected improvement. Every entry reports the median "
+        r"and, in brackets, the interquartile range $[q_{25}, q_{75}]$"
+    )
+    repeats = metadata.get("loop_repeats")
+    if repeats:
+        plural = "repetition" if repeats == 1 else "repetitions"
+        caption += rf" over {repeats} {plural} of the BO iteration."
+    else:
+        caption += "."
+
+    forward_span = rf"\multicolumn{{{n_acqf}}}{{c}}{{Forward evaluation [ms]}}"
+    opt_span = rf"\multicolumn{{{n_acqf}}}{{c}}{{Acquisition optimisation [s]}}"
+    loop_span = r"\multicolumn{2}{c}{Sequential BO iteration [s]}"
+    lines = [
+        r"\begin{table*}[t]",
         r"\centering",
-        rf"\caption{{Mean $\pm$ std wall-clock time (milliseconds) of the {metric_title} "
-        rf"of the acquisition function on the \textsc{{{function}}} benchmark, as a "
-        rf"function of the number of training points $n$ per GP and of the {axis_title} "
-        rf"{axis_latex} (the other complexity knobs held at baseline), averaged over "
-        rf"{runs} runs. dcKG is split into one decoupled source and its full coupled cKG "
-        rf"source; cEI has no {axis_title} knob and is shown as a reference row.}}",
-        rf"\label{{tab:timing_{function.lower()}_{suffix}_{axis_meta['col']}}}",
-        rf"\begin{{tabular}}{{{cols}}}",
+        rf"\caption{{{caption}}}",
+        r"\label{tab:mystery_timing}",
+        rf"\{font_size}",
+        rf"\begin{{tabular}}{{{'r' * (1 + 2 * n_acqf + 2)}}}",
         r"\toprule",
-        header,
+        rf"Training & {forward_span} & {opt_span} & {loop_span} \\",
+        (rf"\cmidrule(lr){{2-{1 + n_acqf}}} "
+         rf"\cmidrule(lr){{{2 + n_acqf}-{1 + 2 * n_acqf}}} "
+         rf"\cmidrule(lr){{{2 + 2 * n_acqf}-{3 + 2 * n_acqf}}}"),
+        ("points & " + " & ".join(labels + labels + ["dcKG", "cEI"]) + r" \\"),
         r"\midrule",
-        *body,
-        r"\bottomrule",
-        r"\end{tabular}",
-        r"\end{table}",
-    ])
+    ]
+    lines += [f"{n} & " + " & ".join(cells) + r" \\" for n, cells in rows]
+    lines += [r"\bottomrule", r"\end{tabular}", r"\end{table*}"]
+    return "\n".join(lines)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build timing-study tables.")
+    parser = argparse.ArgumentParser(description="Render the Mystery timing table.")
     parser.add_argument("--input", type=str, default=os.path.join("results", "timing_study"),
-                        help="Directory containing timing_*.csv files (default: results/timing_study)")
+                        help="Directory with the Launcher_timing.py output "
+                             "(default: results/timing_study)")
+    parser.add_argument("--font-size", type=str, choices=FONT_SIZES, default="small",
+                        help="LaTeX size command applied to the tabular; ten timing cells is a "
+                             "wide row (default: small)")
     args = parser.parse_args()
 
-    df = load_results(args.input)
-    all_aggs = []
-    for metric in METRICS.values():
-        for axis_col, axis_meta in AXES.items():
-            axis_meta = {**axis_meta, "col": axis_col}
-            sub = filter_to_axis(df, axis_col, axis_meta["others"])
-            agg = aggregate(sub, metric["methods"], metric["title"], axis_col)
-            if agg is None or agg.empty:
-                continue
-            all_aggs.append(agg)
-            for function in sorted(agg["function"].unique()):
-                agg_fn = agg[agg["function"] == function]
-                pivot, n_trains = build_pivot(agg_fn, metric["methods"], axis_meta)
-                runs = int(agg_fn["runs"].max())
-                print(to_markdown(pivot, function, runs, metric["title"], axis_meta["title"]))
-                print()
-                tex_path = os.path.join(
-                    args.input,
-                    f"timing_table_{function}_{metric['suffix']}_{axis_col}.tex")
-                with open(tex_path, "w") as f:
-                    f.write(to_latex(pivot, function, n_trains, runs,
-                                     metric["title"], metric["suffix"], axis_meta) + "\n")
-                print(f"LaTeX table written to {tex_path}\n")
+    metadata = read_metadata(os.path.join(args.input, METADATA))
+    n_train_values = metadata.get("n_train_values") or N_TRAIN_VALUES
+    # The table always shows the four paper training sizes, even if a partial
+    # run only covered some of them (missing cells become "--").
+    n_train_values = sorted(set(N_TRAIN_VALUES) | set(int(n) for n in n_train_values))
 
-    if not all_aggs:
-        raise SystemExit("No matching timing rows found.")
-    summary_path = os.path.join(args.input, "timing_summary.csv")
-    pd.concat(all_aggs, ignore_index=True).to_csv(summary_path, index=False)
-    print(f"Aggregated summary written to {summary_path}")
+    rows = build_rows(args.input, n_train_values)
+    print(to_markdown(rows))
+    print()
+
+    tex_path = os.path.join(args.input, TABLE)
+    with open(tex_path, "w") as f:
+        f.write(to_latex(rows, metadata, args.font_size) + "\n")
+    print(f"LaTeX table written to {tex_path}")
 
 
 if __name__ == "__main__":
