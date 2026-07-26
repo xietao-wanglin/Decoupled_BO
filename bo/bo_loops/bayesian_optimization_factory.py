@@ -6,7 +6,8 @@ from bo.acquisition_functions.acquisition_functions import AcquisitionFunctionTy
 from bo.bo_loops.bayesian_optimization_loop_type import BayesianOptimizationLoopType
 from bo.bo_loops.bo_loop import OptimizationLoop, EI_Decoupled_OptimizationLoop, EI_OptimizationLoop, \
     Decoupled_EIKG_OptimizationLoop, CoupledAndDecoupledOptimizationLoop, OPT_UCB_OptimizationLoop, \
-    AllSourcesOptimizationLoop, IndependentSourcesOptimizationLoop
+    AllSourcesOptimizationLoop, IndependentSourcesOptimizationLoop, \
+    AblationIndependentSourcesOptimizationLoop
 from bo.result_utils.result_container import Results
 from bo.synthetic_test_functions.synthetic_test_functions import *
 
@@ -291,6 +292,52 @@ class BayesianOptimizationLoopFactory:
                 costs=self.costs,
                 results=results,
                 penalty_value=torch.tensor([self.penalty_value]),
+                **self._resume_kwargs(resume_state),
+            )
+
+        elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_NO_COUPLED:
+            print('\n Starting dcKG ablation: no coupled cKG candidate:')
+            filename = self.base_file_name + "_dckg_nocoupled_" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
+            bo_loop = AblationIndependentSourcesOptimizationLoop(
+                black_box_func=self.black_box_function,
+                objective=self.constrained_obj,
+                ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
+                bounds=bounds,
+                performance_type=performance_type,
+                model=self.model,
+                seed=self.seed,
+                budget=self.budget,
+                number_initial_designs=number_initial_designs,
+                costs=self.costs,
+                results=results,
+                penalty_value=torch.tensor([self.penalty_value]),
+                ablation_mode="no_coupled_candidate",
+                **self._resume_kwargs(resume_state),
+            )
+
+        elif bayesian_optimization_loop_type == BayesianOptimizationLoopType.DCKG_PURE:
+            print('\n Starting dcKG ablation: fully decoupled:')
+            filename = self.base_file_name + "_dckg_pure_" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
+            bo_loop = AblationIndependentSourcesOptimizationLoop(
+                black_box_func=self.black_box_function,
+                objective=self.constrained_obj,
+                ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
+                bounds=bounds,
+                performance_type=performance_type,
+                model=self.model,
+                seed=self.seed,
+                budget=self.budget,
+                number_initial_designs=number_initial_designs,
+                costs=self.costs,
+                results=results,
+                penalty_value=torch.tensor([self.penalty_value]),
+                ablation_mode="fully_decoupled",
                 **self._resume_kwargs(resume_state),
             )
 

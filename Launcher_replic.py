@@ -7,7 +7,8 @@ from pathlib import Path
 TARGET_SCRIPT = Path(__file__).with_name("Launcher.py")
 
 
-def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: int, cost=None):
+def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: int, cost=None,
+                ablation=None):
     cmd = [
         sys.executable,
         str(TARGET_SCRIPT),
@@ -24,6 +25,9 @@ def run_command(function_name: str, decoupled: bool, min_seed: int, max_seed: in
 
     if cost is not None:
         cmd += ["--cost", str(cost)]
+
+    if ablation is not None:
+        cmd += ["--ablation", ablation]
 
     print("Running:", " ".join(cmd))
     subprocess.run(cmd, check=True)
@@ -42,28 +46,32 @@ def main():
     max_seed = 1 if args.smoke else 40
 
     runs = [
-        # (function_name, decoupled, cost)
-        # ("MysteryRedundant", True, None),
-        # ("MysteryRedundant", False, None)
-        ("TestFunc3RedundantNoNoise", True, None)
+        # (function_name, decoupled, cost, ablation)
+        # ablation: None (default algorithms), "pure", "nocoupled" or "both"
+        ("TestFunc3", True, None, "pure"),
+        # ("TestFunc3", True, None, "nocoupled"),
+        # ("MysteryRedundant", True, None, None),
+        # ("MysteryRedundant", False, None, None)
+        # ("TestFunc3RedundantNoNoise", True, None, None),
         # Unequal-cost decoupled experiments (cost=5 makes each source expensive in turn).
-        # ("Mystery", True, 5),      # 1 constraint -> [5,1] / [1,5]
-        # ("TestFunc3", True, 5),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
-        # ("Branin", True, 5),       # 1 constraint -> [5,1] / [1,5]
-        # ("PressureVessel", False, None),
-        # ("SpeedReducer", True, None),
-        # ("two_layer_cnn_discrete", True, None),
-        # ("WeldedBeam", True, None),
-        # ("TensionCompression", True, None),
+        # ("Mystery", True, 5, None),      # 1 constraint -> [5,1] / [1,5]
+        # ("TestFunc3", True, 5, None),    # 3 constraints -> [5,1,1,1] / [1,5,1,1] / [1,1,5,1] / [1,1,1,5]
+        # ("Branin", True, 5, None),       # 1 constraint -> [5,1] / [1,5]
+        # ("PressureVessel", False, None, None),
+        # ("SpeedReducer", True, None, None),
+        # ("two_layer_cnn_discrete", True, None, None),
+        # ("WeldedBeam", True, None, None),
+        # ("TensionCompression", True, None, None),
     ]
 
-    for function_name, decoupled, cost in runs:
+    for function_name, decoupled, cost, ablation in runs:
         run_command(
             function_name=function_name,
             decoupled=decoupled,
             min_seed=min_seed,
             max_seed=max_seed,
             cost=cost,
+            ablation=ablation,
         )
 
 

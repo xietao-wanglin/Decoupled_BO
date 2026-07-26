@@ -2,6 +2,7 @@ import argparse
 import itertools
 import logging
 import random
+from typing import Optional
 
 import numpy as np
 import torch
@@ -119,8 +120,18 @@ def run_experiment_coupled_acquisition_functions(black_box_function: SingleObjec
         bo_loop.run()
 
 
-def get_bo_algorithms(decoupled: bool):
+ABLATION_ALGORITHMS = {
+    "nocoupled": [BayesianOptimizationLoopType.DCKG_NO_COUPLED],
+    "pure": [BayesianOptimizationLoopType.DCKG_PURE],
+    "both": [BayesianOptimizationLoopType.DCKG_NO_COUPLED,
+             BayesianOptimizationLoopType.DCKG_PURE],
+}
+
+
+def get_bo_algorithms(decoupled: bool, ablation: Optional[str] = None):
     """Returns the appropriate Bayesian Optimization algorithms based on acquisition function type."""
+    if decoupled and ablation:
+        return ABLATION_ALGORITHMS[ablation]
     if decoupled:
         return [
             # BayesianOptimizationLoopType.DCKG_ALL_SOURCES,
@@ -207,6 +218,18 @@ if __name__ == '__main__':
         "--decoupled",
         action="store_true",
         help="Enable decoupled acquisition functions"
+    )
+
+    parser.add_argument(
+        "--ablation",
+        nargs="?",
+        const="both",
+        default=None,
+        choices=["nocoupled", "pure", "both"],
+        help="With --decoupled, run a dcKG ablation instead of the default decoupled "
+             "algorithms. 'nocoupled' drops the coupled cKG candidate; 'pure' also "
+             "replaces the all-zero fallback with a single round-robin source; "
+             "'both' (the bare flag) runs the two in sequence."
     )
 
     parser.add_argument("--min-seed", type=int, default=0,
@@ -322,7 +345,8 @@ if __name__ == '__main__':
     # Parameters
     costs = [args.cost]
     seeds = list(range(args.min_seed, args.max_seed + 1))
-    bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled)
+    bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled,
+                                                         ablation=args.ablation)
 
     # Run experiments
     for bayesian_optimization_algorithm, budget, cost, seed in itertools.product(bayesian_optimization_algorithms,

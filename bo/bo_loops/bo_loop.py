@@ -1585,3 +1585,123 @@ class IndependentSourcesOptimizationLoop(OptimizationLoop):
 
         end_time = time.time() - start_time
         print(f'Total time: {end_time} seconds')
+
+
+class AblationIndependentSourcesOptimizationLoop(IndependentSourcesOptimizationLoop):
+    """IndependentSourcesOptimizationLoop with the coupled cKG candidate removed.
+
+    ablation_mode:
+      "no_coupled_candidate" — only the K+1 decoupled sources compete on KG/cost;
+          the all-zero fallback still evaluates every non-trivially-feasible output.
+      "fully_decoupled" — as above, but the all-zero fallback evaluates a single
+          source (round-robin), so no iteration ever queries more than one source.
+    """
+
+    def __init__(self, *args, ablation_mode="no_coupled_candidate", **kwargs):
+        assert ablation_mode in ("no_coupled_candidate", "fully_decoupled")
+        self.ablation_mode = ablation_mode
+        super().__init__(*args, **kwargs)
+
+    def run(self):
+        train_x, train_y, model, budget_consumed = self._initialize_state()
+
+        start_time = time.time()
+        iteration = 0
+
+        warm_cache = {}  # source index -> (1, Q, d) from previous iteration
+        fallback_rr = 0  # round-robin cursor for the fully-decoupled fallback
+
+        while budget_consumed < self.budget:
+            iteration += 1
+            best_observed_location, best_observed_value = self.best_observed(
+                best_value_computation_type=self.performance_type,
+                train_x=train_x, train_y=train_y, model=model, bounds=self.bounds)
+
+            all_dckg = AllSourcesDcKG(
+                model,
+                penalty_value=self.penalty_value,
+                x_best_location=best_observed_location,
+                objective=self.objective,
+                n_fantasies=7,
+                n_constraint_samples=5,
+                n_disc=128,
+                seed=iteration,
+            )
+            # Drop the trailing CoupledCKG source; it is built but never optimised.
+            n_decoupled = all_dckg.n_sources - 1
+
+            kg_values = torch.zeros(n_decoupled)
+            best_xs = []
+            for s in range(n_decoupled):
+                start = time.time()
+                best_x_s, val_s = self._optimize_single_source(
+                    all_dckg.sources[s], self.bounds,
+                    x_best=all_dckg.x_best,
+                    num_restarts=15, raw_samples=72,
+                    seed=iteration + s * 100,
+                    warm_start_ic=warm_cache.get(s),
+                )
+                kg_values[s] = val_s
+                best_xs.append(best_x_s)
+                stop = time.time()
+                print("source: ", s, " finished: ", stop - start)
+
+            if (kg_values == 0).all():
+                new_x = best_observed_location.detach().reshape(1, -1)
+                if self.ablation_mode == "fully_decoupled":
+                    idx_to_eval_fallback = [fallback_rr % n_decoupled]
+                    fallback_rr += 1
+                else:
+                    idx_to_eval_fallback = self.compute_important_idxs(model, new_x)
+                for src_idx in idx_to_eval_fallback:
+                    new_y = self.evaluate_black_box_func(new_x, src_idx)
+                    train_x[src_idx] = torch.cat([train_x[src_idx].cpu(), new_x.cpu()])
+                    train_y[src_idx] = torch.cat([train_y[src_idx].cpu(), new_y.cpu()])
+                index = n_decoupled  # sentinel: fallback taken, no source elected
+                saved_output_index = idx_to_eval_fallback
+                budget_consumed += torch.sum(self.costs[idx_to_eval_fallback])
+            else:
+                index = torch.argmax(kg_values / self.costs)
+                new_x = best_xs[index][:, 0:1, :].reshape(1, -1)
+                new_y = self.evaluate_black_box_func(new_x, index)
+                train_x[index] = torch.cat([train_x[index].cpu(), new_x.cpu()])
+                train_y[index] = torch.cat([train_y[index].cpu(), new_y.cpu()])
+                saved_output_index = [index.item()]
+                budget_consumed += self.costs[index]
+            model = self.update_model(X=train_x, y=train_y)
+
+            # Cache optimised candidates from non-elected sources with KG > 0
+            warm_cache = {}
+            for s in range(n_decoupled):
+                if s != index and kg_values[s] > 0:
+                    warm_cache[s] = best_xs[s].detach().cpu()
+
+            kg_str = ", ".join(f"src{i}={v:.5f}" for i, v in enumerate(kg_values))
+            print(
+                f"\nBatch{iteration:>2} finished [{self.ablation_mode}]: best value = "
+                f"({best_observed_value:>4.5f}), KG values: [{kg_str}], "
+                f"selected task {index}, evaluated {saved_output_index}, "
+                f"best location " + str(
+                    best_observed_location.detach().cpu().numpy()) + " current sample decision x: " + str(
+                    new_x.detach().cpu().numpy()) + "\n",
+                end="",
+            )
+            self.save_parameters(
+                train_x=train_x, train_y=train_y,
+                model_length_scales=self.model_wrapper.get_model_length_scales(),
+                best_predicted_location=best_observed_location,
+                best_predicted_location_value=self.evaluate_location_true_quality(best_observed_location),
+                acqf_recommended_location=new_x,
+                acqf_recommended_location_true_value=(
+                    None if self.black_box_func.is_expensive()
+                    else self.evaluate_location_true_quality(new_x)
+                ),
+                acqf_recommended_output_index=saved_output_index,
+                acqf_values=kg_values,
+                budget_consumed=budget_consumed,
+            )
+            middle_time = time.time() - start_time
+            print(f'took {middle_time} seconds')
+
+        end_time = time.time() - start_time
+        print(f'Total time: {end_time} seconds')
