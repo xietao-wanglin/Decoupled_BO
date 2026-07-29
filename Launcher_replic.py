@@ -38,7 +38,7 @@ def main():
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="Quick smoke test: run only seeds 0-2",
+        help="Quick smoke test: run the whole sweep with seeds 0-1 only",
     )
     args = parser.parse_args()
 

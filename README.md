@@ -53,6 +53,60 @@ from the Hugging Face Hub on first use.
 
 ## Running experiments
 
+**`Launcher_replic.py` is the main entry point.** It reproduces every experiment in the paper:
+
+```bash
+python Launcher_replic.py --smoke    # seeds 0-1 — start here, checks the whole sweep runs
+python Launcher_replic.py            # seeds 0-39 — the full paper sweep
+```
+
+### How it works
+
+`Launcher_replic.py` holds the sweep as a list of configurations and runs `Launcher.py` once per
+entry in a subprocess, so every configuration starts from a clean interpreter. Each entry is a
+4-tuple:
+
+```python
+runs = [
+    # (function_name, decoupled, cost, ablation)
+    ("Mystery",   False, None, None),    # cEI and cKG on Mystery, equal costs
+    ("Mystery",   True,  None, None),    # dcKG on Mystery, equal costs
+    ("Mystery",   True,  5,    None),    # dcKG, each source made expensive in turn
+    ("TestFunc3", True,  None, "both"),  # the two dcKG ablations
+]
+```
+
+- `function_name` — one of the `--function` values in the benchmark table above.
+- `decoupled` — `False` runs the coupled baselines (cEI **and** cKG); `True` runs dcKG.
+- `cost` — `None` for equal costs; a number (the paper uses `5`) repeats the run with each source
+  made expensive in turn, i.e. `K + 1` runs for `K` constraints. Decoupled only.
+- `ablation` — `None`, or `"nocoupled"` / `"pure"` / `"both"` to run the supplement's
+  dcKG-without-cKG variants instead of dcKG. Decoupled only.
+
+The shipped list is exactly the paper's sweep: the eight benchmarks coupled and decoupled at equal
+cost, the noisy-constraint variants of Test Function 2, the heterogeneous-cost runs on Mystery,
+Branin and Test Function 2, and the ablations. To run a subset, comment out the entries you do not
+need; to add a configuration, append a tuple. `--smoke` only narrows the seed range (0–1), it still
+walks the whole list.
+
+Expect the full sweep to take a long time: 24 configurations × 40 seeds, and a single dcKG iteration
+costs roughly 7–12 s of overhead on top of the benchmark evaluation (see the timing study below).
+A configuration that exits non-zero aborts the sweep rather than being skipped
+(`subprocess.run(..., check=True)`). Because runs resume (next section), it is safe to interrupt and
+restart, or to split the list across machines: fix the cause and re-run, and the driver picks up
+where it stopped instead of redoing finished work.
+
+### Results, resuming and single runs
+
+Per-iteration histories are pickled under `results/`, one file per (benchmark, cost setting,
+algorithm, seed). Default budget is 160 evaluations, 300 for the CNN and BOLT benchmarks. On startup
+each run inspects its own file: it **skips** the run if the budget is already spent and **resumes**
+from the stored data otherwise — so re-running `Launcher_replic.py` after an interruption only does
+the work that is left.
+
+To run a single configuration directly — for debugging, or to parallelise the sweep by hand — call
+`Launcher.py` with the same options:
+
 ```bash
 # Coupled baselines (cEI and cKG)
 python Launcher.py --function Mystery --min-seed 0 --max-seed 39
@@ -67,16 +121,9 @@ python Launcher.py --function Mystery --min-seed 0 --max-seed 39 --decoupled --c
 python Launcher.py --function TestFunc3 --min-seed 0 --max-seed 39 --decoupled --ablation both
 ```
 
-Default budget is 160 evaluations (300 for the CNN and BOLT benchmarks). Per-iteration histories are
-pickled under `results/`, one file per (benchmark, cost setting, algorithm, seed). A run that finds
-an existing file resumes from it, or skips it if the budget is already spent.
-
-`Launcher_replic.py` drives the whole sweep by calling `Launcher.py` once per configuration:
-
-```bash
-python Launcher_replic.py            # seeds 0-39
-python Launcher_replic.py --smoke    # seeds 0-1, for a quick check
-```
+Which algorithms a `Launcher.py` invocation runs is decided by `get_bo_algorithms()` in that file:
+`[CEI, CKG_V2]` when coupled, `[DCKG_INDEPENDENT]` when `--decoupled`. Edit those lists to add or
+drop a method across the whole sweep.
 
 ## Timing study
 
@@ -104,8 +151,8 @@ tests check shapes, non-negativity and the epigraph/KGCB implementations.
 ## Layout
 
 ```
-Launcher.py          entry point: one benchmark, one algorithm family, a range of seeds
-Launcher_replic.py   batch driver over the full sweep
+Launcher_replic.py   main entry point: the whole paper sweep, one subprocess per configuration
+Launcher.py          a single configuration: one benchmark, coupled or decoupled, a range of seeds
 Launcher_timing.py   timing benchmark; timing_table.py renders its LaTeX table
 bo/acquisition_functions/  cEI / cKG / dcKG acquisition functions
 bo/bo_loops/               BO loops and the factory that wires them up
