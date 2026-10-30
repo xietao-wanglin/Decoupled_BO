@@ -128,8 +128,20 @@ ABLATION_ALGORITHMS = {
 }
 
 
-def get_bo_algorithms(decoupled: bool, ablation: Optional[str] = None):
+COST_RULE_ALGORITHMS = {
+    "subset": [BayesianOptimizationLoopType.DCKG_COST_SUBSET],
+    "full": [BayesianOptimizationLoopType.DCKG_COST_FULL],
+    "best": [BayesianOptimizationLoopType.DCKG_COST_BEST],
+    "all": [BayesianOptimizationLoopType.DCKG_COST_SUBSET,
+            BayesianOptimizationLoopType.DCKG_COST_FULL,
+            BayesianOptimizationLoopType.DCKG_COST_BEST],
+}
+
+
+def get_bo_algorithms(decoupled: bool, ablation: Optional[str] = None, cost_rule: Optional[str] = None):
     """Returns the appropriate Bayesian Optimization algorithms based on acquisition function type."""
+    if decoupled and cost_rule:
+        return COST_RULE_ALGORITHMS[cost_rule]
     if decoupled and ablation:
         return ABLATION_ALGORITHMS[ablation]
     if decoupled:
@@ -230,6 +242,15 @@ if __name__ == '__main__':
              "algorithms. 'nocoupled' drops the coupled cKG candidate; 'pure' also "
              "replaces the all-zero fallback with a single round-robin source; "
              "'both' (the bare flag) runs the two in sequence."
+    )
+
+    parser.add_argument(
+        "--cost-rule",
+        default=None,
+        choices=["subset", "full", "best", "all"],
+        help="With --decoupled, run dcKG with a consistent value/cost rule for the coupled "
+             "candidate: 'subset' (cKG_S / C_S), 'full' (cKG_all / C_all), 'best' (better "
+             "of the two), or 'all' to run the three in sequence."
     )
 
     parser.add_argument("--min-seed", type=int, default=0,
@@ -346,7 +367,8 @@ if __name__ == '__main__':
     costs = [args.cost]
     seeds = list(range(args.min_seed, args.max_seed + 1))
     bayesian_optimization_algorithms = get_bo_algorithms(decoupled=args.decoupled,
-                                                         ablation=args.ablation)
+                                                         ablation=args.ablation,
+                                                         cost_rule=args.cost_rule)
 
     # Run experiments
     for bayesian_optimization_algorithm, budget, cost, seed in itertools.product(bayesian_optimization_algorithms,

@@ -18,3 +18,7 @@ class BayesianOptimizationLoopType(Enum):
     # Ablations of DCKG_INDEPENDENT with the coupled cKG candidate removed
     DCKG_NO_COUPLED = auto()        # No coupled candidate; coupled all-zero fallback kept
     DCKG_PURE = auto()              # No coupled candidate; single-source all-zero fallback
+    # DCKG_INDEPENDENT with a consistent value/cost rule for the coupled candidate
+    DCKG_COST_SUBSET = auto()       # cKG_S / C_S, sample S
+    DCKG_COST_FULL = auto()         # cKG_all / C_all, sample every source
+    DCKG_COST_BEST = auto()         # better of the two competes with the decoupled sources

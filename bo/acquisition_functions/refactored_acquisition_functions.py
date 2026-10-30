@@ -469,9 +469,15 @@ class ConstraintDcKG(BaseConstrainedKG):
 
 
 class CoupledCKG(BaseConstrainedKG):
-    """cKG (Eq. 7): all sources updated jointly, outer MC over Z_c."""
+    """cKG (Eq. 7): all sources updated jointly, outer MC over Z_c.
 
-    def __init__(self, model, *, n_constraint_samples: int = 5, **kwargs):
+    fixed_constraints: optional 0-based constraint indices that are NOT observed.
+    Their sigma_tilde is zeroed, so their posteriors (and PF factors) stay at the
+    current values in every fantasy. Z_c draws are unchanged, so the result is
+    directly comparable with the unrestricted cKG built with the same seed.
+    """
+
+    def __init__(self, model, *, n_constraint_samples: int = 5, fixed_constraints=None, **kwargs):
         super().__init__(model=model, **kwargs)
         dev = self.x_best.device
         if self.K > 0:
@@ -482,6 +488,10 @@ class CoupledCKG(BaseConstrainedKG):
         else:
             self.z_c = torch.zeros(n_constraint_samples, 1, device=dev, dtype=torch.double)
         self.n_zc = n_constraint_samples
+        self.update_mask = None
+        if fixed_constraints:
+            self.update_mask = torch.ones(self.K, device=dev, dtype=torch.double)
+            self.update_mask[list(fixed_constraints)] = 0.0
 
     def _evaluate(self, x, X_disc, B):
         X_full = torch.cat([
@@ -511,6 +521,8 @@ class CoupledCKG(BaseConstrainedKG):
         st_ck = torch.stack(st_ck_list)  # (K, B, M)
         mu_ck = torch.stack(mu_ck_list)  # (K, B, M)
         var_ck = torch.stack(var_ck_list)  # (K, B, M)
+        if self.update_mask is not None:
+            st_ck = st_ck * self.update_mask.view(-1, 1, 1)
 
         z_exp = self.z_c.unsqueeze(-1).unsqueeze(-1)
         mu_new = mu_ck.unsqueeze(0) + st_ck.unsqueeze(0) * z_exp

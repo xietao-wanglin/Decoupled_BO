@@ -22,6 +22,7 @@ class Results:
         self.acqf_recommended_output_index = []
         self.failing_constraint = []
         self.evals = []
+        self.decision_log = []
 
     def save_budget_consumed(self, budget_consumed):
         self.budget_consumed.append(budget_consumed.item())
@@ -74,6 +75,9 @@ class Results:
     def save_model_length_scales(self, model_length_scales):
         self.model_length_scales.append(model_length_scales)
 
+    def save_decision(self, decision):
+        self.decision_log.append(decision)
+
     def save_cost_configurations(self, cost_configuration):
         self.cost_configurations = cost_configuration
 
@@ -116,6 +120,7 @@ class Results:
         r.acqf_recommended_output_index = list(d['acqf_recommended_output_index:'])
         r.failing_constraint = list(d['failing_index:'])
         r.evals = list(d['evaluated_functions'])
+        r.decision_log = list(d.get('decision_log', []))
         return r
 
     def _build_results_dict(self):
@@ -137,4 +142,5 @@ class Results:
                 "acqf_values": self.acqf_values,
                 "failing_index:": self.failing_constraint,
                 "evaluated_functions": self.evals,
-                "budget_consumed": self.budget_consumed}
+                "budget_consumed": self.budget_consumed,
+                "decision_log": self.decision_log}

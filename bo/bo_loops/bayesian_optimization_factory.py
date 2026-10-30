@@ -7,13 +7,20 @@ from bo.bo_loops.bayesian_optimization_loop_type import BayesianOptimizationLoop
 from bo.bo_loops.bo_loop import OptimizationLoop, EI_Decoupled_OptimizationLoop, EI_OptimizationLoop, \
     Decoupled_EIKG_OptimizationLoop, CoupledAndDecoupledOptimizationLoop, OPT_UCB_OptimizationLoop, \
     AllSourcesOptimizationLoop, IndependentSourcesOptimizationLoop, \
-    AblationIndependentSourcesOptimizationLoop
+    AblationIndependentSourcesOptimizationLoop, CostRuleIndependentSourcesOptimizationLoop
 from bo.result_utils.result_container import Results
 from bo.synthetic_test_functions.synthetic_test_functions import *
 
 from bo.device_utils import DEVICE as device, DTYPE as dtype
 torch.set_default_dtype(dtype)
 settings.min_fixed_noise._global_double_value = 1e-6
+
+
+COST_RULE_LOOPS = {
+    BayesianOptimizationLoopType.DCKG_COST_SUBSET: "subset",
+    BayesianOptimizationLoopType.DCKG_COST_FULL: "full",
+    BayesianOptimizationLoopType.DCKG_COST_BEST: "best",
+}
 
 
 class BayesianOptimizationLoopFactory:
@@ -338,6 +345,30 @@ class BayesianOptimizationLoopFactory:
                 results=results,
                 penalty_value=torch.tensor([self.penalty_value]),
                 ablation_mode="fully_decoupled",
+                **self._resume_kwargs(resume_state),
+            )
+
+        elif bayesian_optimization_loop_type in COST_RULE_LOOPS:
+            cost_rule = COST_RULE_LOOPS[bayesian_optimization_loop_type]
+            print(f'\n Starting dcKG independent sources, coupled cost rule "{cost_rule}":')
+            filename = self.base_file_name + "_dckg_costrule_" + cost_rule + "_" + str(self.seed) + ".pkl"
+            results, resume_state, skip = self._load_or_skip(filename, self.budget)
+            if skip:
+                return None
+            bo_loop = CostRuleIndependentSourcesOptimizationLoop(
+                black_box_func=self.black_box_function,
+                objective=self.constrained_obj,
+                ei_type=AcquisitionFunctionType.DECOUPLED_CONSTRAINED_KNOWLEDGE_GRADIENT_V2,
+                bounds=bounds,
+                performance_type=performance_type,
+                model=self.model,
+                seed=self.seed,
+                budget=self.budget,
+                number_initial_designs=number_initial_designs,
+                costs=self.costs,
+                results=results,
+                penalty_value=torch.tensor([self.penalty_value]),
+                cost_rule=cost_rule,
                 **self._resume_kwargs(resume_state),
             )
 

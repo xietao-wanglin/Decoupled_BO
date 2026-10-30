@@ -1705,3 +1705,165 @@ class AblationIndependentSourcesOptimizationLoop(IndependentSourcesOptimizationL
 
         end_time = time.time() - start_time
         print(f'Total time: {end_time} seconds')
+
+
+class CostRuleIndependentSourcesOptimizationLoop(IndependentSourcesOptimizationLoop):
+    """IndependentSourcesOptimizationLoop with a consistent value/cost rule for the coupled step.
+
+    The default loop scores the coupled step as cKG_all(x) / C_S: the value assumes every
+    source is observed at x, but only S (objective + constraints that are not trivially
+    feasible at x) is sampled and paid for. cost_rule makes value and cost describe the
+    same action:
+      "subset" — cKG_S(x) / C_S, sample S (constraints outside S held fixed in cKG).
+      "full"   — cKG_all(x) / C_all, sample every source.
+      "best"   — both coupled options compete with the decoupled sources.
+
+    Every iteration also records what the default rule would have chosen from the same
+    state (results.decision_log), so we can count how often the rule changes the decision.
+    """
+
+    def __init__(self, *args, cost_rule="best", **kwargs):
+        assert cost_rule in ("subset", "full", "best")
+        self.cost_rule = cost_rule
+        super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def _coupled_subset_value(acqf_kwargs, best_x_ckg, fixed_constraints):
+        """cKG_S at the coupled candidate and the full cKG's discretisation."""
+        ckg_s = CoupledCKG(fixed_constraints=fixed_constraints, **acqf_kwargs)
+        with torch.no_grad():
+            return ckg_s(best_x_ckg).item()
+
+    def run(self):
+        train_x, train_y, model, budget_consumed = self._initialize_state()
+
+        start_time = time.time()
+        iteration = 0
+
+        warm_cache = {}  # source index -> (1, Q, d) from previous iteration
+
+        while budget_consumed < self.budget:
+            iteration += 1
+            best_observed_location, best_observed_value = self.best_observed(
+                best_value_computation_type=self.performance_type,
+                train_x=train_x, train_y=train_y, model=model, bounds=self.bounds)
+
+            acqf_kwargs = dict(
+                model=model,
+                penalty_value=self.penalty_value,
+                x_best_location=best_observed_location,
+                objective=self.objective,
+                n_fantasies=7,
+                n_constraint_samples=5,
+                seed=iteration,
+            )
+            all_dckg = AllSourcesDcKG(n_disc=128, **acqf_kwargs)
+
+            kg_values = torch.zeros(all_dckg.n_sources)
+            best_xs = []
+            for s, source_acqf in enumerate(all_dckg.sources):
+                start = time.time()
+                best_x_s, val_s = self._optimize_single_source(
+                    source_acqf, self.bounds,
+                    x_best=all_dckg.x_best,
+                    num_restarts=15, raw_samples=72,
+                    seed=iteration + s * 100,
+                    warm_start_ic=warm_cache.get(s),
+                )
+                kg_values[s] = val_s
+                best_xs.append(best_x_s)
+                stop = time.time()
+                print("source: ", s, " finished: ", stop - start)
+
+            coupled = all_dckg.n_sources - 1
+            x_ckg = best_xs[coupled][:, 0:1, :].reshape(1, -1)
+            all_idx = list(range(self.number_of_outputs))
+            subset_idx = sorted(self.compute_important_idxs(model, x_ckg))
+            fixed = [k - 1 for k in all_idx if k not in subset_idx]
+            ckg_all = kg_values[coupled].item()
+            ckg_subset = ckg_all
+            if fixed and self.cost_rule != "full":
+                ckg_subset = self._coupled_subset_value(acqf_kwargs, best_xs[coupled], fixed)
+            cost_subset = torch.sum(self.costs[subset_idx]).item()
+            cost_all = torch.sum(self.costs).item()
+
+            # Candidate actions: (label, point, sources, score). Ties go to the first listed.
+            decoupled = [(f"src{s}", best_xs[s][:, 0:1, :].reshape(1, -1), [s],
+                          (kg_values[s] / self.costs[s]).item()) for s in range(coupled)]
+            coupled_options = {
+                "default": [("coupled_S", x_ckg, subset_idx, ckg_all / cost_subset)],
+                "subset": [("coupled_S", x_ckg, subset_idx, ckg_subset / cost_subset)],
+                "full": [("coupled_all", x_ckg, all_idx, ckg_all / cost_all)],
+            }
+            coupled_options["best"] = coupled_options["subset"] + coupled_options["full"]
+            fallback_x = best_observed_location.detach().reshape(1, -1)
+            fallback = ("fallback", fallback_x, sorted(self.compute_important_idxs(model, fallback_x)), 0.0)
+
+            def decide(rule):
+                action = max(decoupled + coupled_options[rule], key=lambda a: a[3])
+                return fallback if action[3] <= 0 else action
+
+            label, new_x, sources, _ = decide(self.cost_rule)
+            default_label, default_x, default_sources, _ = decide("default")
+
+            for src_idx in sources:
+                new_y = self.evaluate_black_box_func(new_x, src_idx)
+                train_x[src_idx] = torch.cat([train_x[src_idx].cpu(), new_x.cpu()])
+                train_y[src_idx] = torch.cat([train_y[src_idx].cpu(), new_y.cpu()])
+            budget_consumed += torch.sum(self.costs[sources])
+            index = int(label[3:]) if label.startswith("src") else coupled
+            model = self.update_model(X=train_x, y=train_y)
+
+            # Cache optimised candidates from non-elected sources with KG > 0
+            warm_cache = {}
+            for s in range(all_dckg.n_sources):
+                if s != index and kg_values[s] > 0:
+                    warm_cache[s] = best_xs[s].detach().cpu()
+
+            decision = {
+                "iteration": iteration,
+                "rule": self.cost_rule,
+                "chosen": label,
+                "chosen_sources": list(sources),
+                "default": default_label,
+                "default_sources": list(default_sources),
+                "point_changed": not torch.equal(new_x, default_x),
+                "sources_changed": sorted(sources) != sorted(default_sources),
+                "ckg_all": ckg_all,
+                # None when cKG_S was not needed ("full" rule with constraints dropped)
+                "ckg_subset": None if fixed and self.cost_rule == "full" else ckg_subset,
+                "cost_subset": cost_subset,
+                "cost_all": cost_all,
+                "subset": subset_idx,
+            }
+            self.results.save_decision(decision)
+
+            kg_str = ", ".join(f"src{i}={v:.5f}" for i, v in enumerate(kg_values))
+            print(
+                f"\nBatch{iteration:>2} finished [{self.cost_rule}]: best value = "
+                f"({best_observed_value:>4.5f}), KG values: [{kg_str}], cKG_S={ckg_subset:.5f}, "
+                f"chosen {label} {sources} (default rule: {default_label} {default_sources}), "
+                f"best location " + str(
+                    best_observed_location.detach().cpu().numpy()) + " current sample decision x: " + str(
+                    new_x.detach().cpu().numpy()) + "\n",
+                end="",
+            )
+            self.save_parameters(
+                train_x=train_x, train_y=train_y,
+                model_length_scales=self.model_wrapper.get_model_length_scales(),
+                best_predicted_location=best_observed_location,
+                best_predicted_location_value=self.evaluate_location_true_quality(best_observed_location),
+                acqf_recommended_location=new_x,
+                acqf_recommended_location_true_value=(
+                    None if self.black_box_func.is_expensive()
+                    else self.evaluate_location_true_quality(new_x)
+                ),
+                acqf_recommended_output_index=sources,
+                acqf_values=kg_values,
+                budget_consumed=budget_consumed,
+            )
+            middle_time = time.time() - start_time
+            print(f'took {middle_time} seconds')
+
+        end_time = time.time() - start_time
+        print(f'Total time: {end_time} seconds')
