@@ -23,6 +23,7 @@ from bo.samplers.samplers import quantileSampler, constantSampler, objectiveQuan
 from debug_utils.utils import record_io
 
 from bo.device_utils import DTYPE as dtype
+from bo.acquisition_functions.noise_utils import observation_noise_variance
 
 class AcquisitionFunctionType(Enum):
     OPTIMISTIC_UCB = auto()
@@ -523,7 +524,7 @@ class DecopledHybridConstrainedKnowledgeGradient(DecoupledAcquisitionFunction, M
 
     @staticmethod
     def get_objective_noise(model):
-        return model.likelihood.noise_covar.noise.view(-1)[0]
+        return observation_noise_variance(model)
 
     @staticmethod
     def kgcb(a: Tensor, b: Tensor, current_best_value) -> Tensor:

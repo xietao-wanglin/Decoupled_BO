@@ -22,6 +22,7 @@ from botorch.optim import optimize_acqf
 from botorch.optim.initializers import gen_batch_initial_conditions
 from gpytorch.mlls import SumMarginalLogLikelihood
 
+from bo.acquisition_functions.noise_utils import observation_noise_variance
 from bo.acquisition_functions.refactored_acquisition_functions import (
     ObjectiveDcKG, CoupledCKG, _batch_epigraph_sweep, _kgcb_batched, _NORMAL,
 )
@@ -121,7 +122,7 @@ def _ckg_per_zc(acqf, X_full):
             mu = p.mean.squeeze(-1)
             var = p.variance.squeeze(-1)
             cov = p.mvn.covariance_matrix
-            noise = acqf.model.models[ck + 1].likelihood.noise_covar.noise.view(-1)[0]
+            noise = observation_noise_variance(acqf.model.models[ck + 1])
             st = cov[:, :, 0] / (cov[:, 0, 0] + noise).sqrt().unsqueeze(-1)
             st_list.append(st); mu_list.append(mu); var_list.append(var)
         M = X_full.shape[1]

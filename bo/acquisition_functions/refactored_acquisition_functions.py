@@ -39,6 +39,8 @@ from botorch.sampling import MCSampler
 from botorch.utils import draw_sobol_normal_samples
 from torch import Tensor
 
+from bo.acquisition_functions.noise_utils import observation_noise_variance
+
 _NORMAL = torch.distributions.Normal(0, 1)
 
 
@@ -341,7 +343,7 @@ class BaseConstrainedKG(DecoupledAcquisitionFunction, MCAcquisitionFunction):
         mu = posterior.mean.squeeze(-1)
         var = posterior.variance.squeeze(-1)
         cov = posterior.mvn.covariance_matrix
-        noise = gp_model.likelihood.noise_covar.noise.view(-1)[0]
+        noise = observation_noise_variance(gp_model)
         cov_col = cov[:, :, 0]
         st = cov_col / (cov[:, 0, 0] + noise).sqrt().unsqueeze(-1)
         return st, mu, var
@@ -444,7 +446,7 @@ class ConstraintDcKG(BaseConstrainedKG):
         var_ck_all = con_p.variance.squeeze(-1)
         cov_ck_all = con_p.mvn.covariance_matrix
 
-        noise_k = con_model.likelihood.noise_covar.noise.view(-1)[0]
+        noise_k = observation_noise_variance(con_model)
         st_ck = cov_ck_all[:, :G_size, -1] / (cov_ck_all[:, -1, -1] + noise_k).sqrt().unsqueeze(-1)
         mu_ck = mu_ck_all[:, :G_size]
         var_ck = var_ck_all[:, :G_size]
@@ -512,7 +514,7 @@ class CoupledCKG(BaseConstrainedKG):
             mu = p.mean.squeeze(-1)
             var = p.variance.squeeze(-1)
             cov = p.mvn.covariance_matrix
-            noise = self.model.models[ck + 1].likelihood.noise_covar.noise.view(-1)[0]
+            noise = observation_noise_variance(self.model.models[ck + 1])
             st = cov[:, :, 0] / (cov[:, 0, 0] + noise).sqrt().unsqueeze(-1)
             st_ck_list.append(st)
             mu_ck_list.append(mu)
